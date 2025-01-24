@@ -28,7 +28,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import org.apache.iceberg.Schema;
 import org.apache.iceberg.expressions.Expressions;
-import org.apache.iceberg.expressions.Literal;
 import org.apache.iceberg.relocated.com.google.common.base.Joiner;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
@@ -51,9 +50,12 @@ public class Types {
           .put(TimeType.get().toString(), TimeType.get())
           .put(TimestampType.withZone().toString(), TimestampType.withZone())
           .put(TimestampType.withoutZone().toString(), TimestampType.withoutZone())
+          .put(TimestampNanoType.withZone().toString(), TimestampNanoType.withZone())
+          .put(TimestampNanoType.withoutZone().toString(), TimestampNanoType.withoutZone())
           .put(StringType.get().toString(), StringType.get())
           .put(UUIDType.get().toString(), UUIDType.get())
           .put(BinaryType.get().toString(), BinaryType.get())
+          .put(UnknownType.get().toString(), UnknownType.get())
           .buildOrThrow();
 
   private static final Pattern FIXED = Pattern.compile("fixed\\[\\s*(\\d+)\\s*\\]");
@@ -261,6 +263,59 @@ public class Types {
     }
   }
 
+  public static class TimestampNanoType extends PrimitiveType {
+    private static final TimestampNanoType INSTANCE_WITH_ZONE = new TimestampNanoType(true);
+    private static final TimestampNanoType INSTANCE_WITHOUT_ZONE = new TimestampNanoType(false);
+
+    public static TimestampNanoType withZone() {
+      return INSTANCE_WITH_ZONE;
+    }
+
+    public static TimestampNanoType withoutZone() {
+      return INSTANCE_WITHOUT_ZONE;
+    }
+
+    private final boolean adjustToUTC;
+
+    private TimestampNanoType(boolean adjustToUTC) {
+      this.adjustToUTC = adjustToUTC;
+    }
+
+    public boolean shouldAdjustToUTC() {
+      return adjustToUTC;
+    }
+
+    @Override
+    public TypeID typeId() {
+      return TypeID.TIMESTAMP_NANO;
+    }
+
+    @Override
+    public String toString() {
+      if (shouldAdjustToUTC()) {
+        return "timestamptz_ns";
+      } else {
+        return "timestamp_ns";
+      }
+    }
+
+    @Override
+    public boolean equals(Object other) {
+      if (this == other) {
+        return true;
+      } else if (!(other instanceof TimestampNanoType)) {
+        return false;
+      }
+
+      return adjustToUTC == ((TimestampNanoType) other).adjustToUTC;
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(TimestampNanoType.class, adjustToUTC);
+    }
+  }
+
   public static class StringType extends PrimitiveType {
     private static final StringType INSTANCE = new StringType();
 
@@ -319,7 +374,7 @@ public class Types {
 
     @Override
     public String toString() {
-      return String.format("fixed[%d]", length);
+      return String.format(Locale.ROOT, "fixed[%d]", length);
     }
 
     @Override
@@ -358,6 +413,59 @@ public class Types {
     }
   }
 
+  public static class VariantType implements Type {
+    private static final VariantType INSTANCE = new VariantType();
+
+    public static VariantType get() {
+      return INSTANCE;
+    }
+
+    @Override
+    public TypeID typeId() {
+      return TypeID.VARIANT;
+    }
+
+    @Override
+    public String toString() {
+      return "variant";
+    }
+
+    @Override
+    public boolean equals(Object o) {
+      if (this == o) {
+        return true;
+      } else if (!(o instanceof VariantType)) {
+        return false;
+      }
+
+      VariantType that = (VariantType) o;
+      return typeId() == that.typeId();
+    }
+
+    @Override
+    public int hashCode() {
+      return Objects.hash(VariantType.class, typeId());
+    }
+  }
+
+  public static class UnknownType extends PrimitiveType {
+    private static final UnknownType INSTANCE = new UnknownType();
+
+    public static UnknownType get() {
+      return INSTANCE;
+    }
+
+    @Override
+    public TypeID typeId() {
+      return TypeID.UNKNOWN;
+    }
+
+    @Override
+    public String toString() {
+      return "unknown";
+    }
+  }
+
   public static class DecimalType extends PrimitiveType {
     public static DecimalType of(int precision, int scale) {
       return new DecimalType(precision, scale);
@@ -390,7 +498,7 @@ public class Types {
 
     @Override
     public String toString() {
-      return String.format("decimal(%d, %d)", precision, scale);
+      return String.format(Locale.ROOT, "decimal(%d, %d)", precision, scale);
     }
 
     @Override
@@ -451,20 +559,14 @@ public class Types {
       return new Builder(true, name);
     }
 
-    public static Builder builder() {
-      return new Builder();
-    }
-
     public static class Builder {
-      private boolean isOptional = true;
-      private String name = null;
+      private final boolean isOptional;
+      private final String name;
       private Integer id = null;
       private Type type = null;
       private String doc = null;
-      private Literal<?> initialDefault = null;
-      private Literal<?> writeDefault = null;
-
-      private Builder() {}
+      private Object initialDefault = null;
+      private Object writeDefault = null;
 
       private Builder(boolean isFieldOptional, String fieldName) {
         isOptional = isFieldOptional;
@@ -479,26 +581,6 @@ public class Types {
         this.doc = toCopy.doc;
         this.initialDefault = toCopy.initialDefault;
         this.writeDefault = toCopy.writeDefault;
-      }
-
-      public Builder asRequired() {
-        this.isOptional = false;
-        return this;
-      }
-
-      public Builder asOptional() {
-        this.isOptional = true;
-        return this;
-      }
-
-      public Builder isOptional(boolean fieldIsOptional) {
-        this.isOptional = fieldIsOptional;
-        return this;
-      }
-
-      public Builder withName(String fieldName) {
-        this.name = fieldName;
-        return this;
       }
 
       public Builder withId(int fieldId) {
@@ -516,39 +598,18 @@ public class Types {
         return this;
       }
 
-      /**
-       * Set the initial default using an Object.
-       *
-       * @deprecated will be removed in 2.0.0; use {@link #withInitialDefault(Literal)} instead.
-       */
-      @Deprecated
       public Builder withInitialDefault(Object fieldInitialDefault) {
-        return withInitialDefault(Expressions.lit(fieldInitialDefault));
-      }
-
-      public Builder withInitialDefault(Literal<?> fieldInitialDefault) {
         initialDefault = fieldInitialDefault;
         return this;
       }
 
-      /**
-       * Set the write default using an Object.
-       *
-       * @deprecated will be removed in 2.0.0; use {@link #withWriteDefault(Literal)} instead.
-       */
-      @Deprecated
       public Builder withWriteDefault(Object fieldWriteDefault) {
-        return withWriteDefault(Expressions.lit(fieldWriteDefault));
-      }
-
-      public Builder withWriteDefault(Literal<?> fieldWriteDefault) {
         writeDefault = fieldWriteDefault;
         return this;
       }
 
       public NestedField build() {
-        Preconditions.checkNotNull(id, "Id cannot be null");
-        // the constructor validates the other fields
+        // the constructor validates the fields
         return new NestedField(isOptional, id, name, type, doc, initialDefault, writeDefault);
       }
     }
@@ -558,8 +619,8 @@ public class Types {
     private final String name;
     private final Type type;
     private final String doc;
-    private final Literal<?> initialDefault;
-    private final Literal<?> writeDefault;
+    private final Object initialDefault;
+    private final Object writeDefault;
 
     private NestedField(
         boolean isOptional,
@@ -567,8 +628,8 @@ public class Types {
         String name,
         Type type,
         String doc,
-        Literal<?> initialDefault,
-        Literal<?> writeDefault) {
+        Object initialDefault,
+        Object writeDefault) {
       Preconditions.checkNotNull(name, "Name cannot be null");
       Preconditions.checkNotNull(type, "Type cannot be null");
       this.isOptional = isOptional;
@@ -580,15 +641,12 @@ public class Types {
       this.writeDefault = castDefault(writeDefault, type);
     }
 
-    private static Literal<?> castDefault(Literal<?> defaultValue, Type type) {
+    private static Object castDefault(Object defaultValue, Type type) {
       if (type.isNestedType() && defaultValue != null) {
         throw new IllegalArgumentException(
             String.format("Invalid default value for %s: %s (must be null)", type, defaultValue));
       } else if (defaultValue != null) {
-        Literal<?> typedDefault = defaultValue.to(type);
-        Preconditions.checkArgument(
-            typedDefault != null, "Cannot cast default value to %s: %s", type, defaultValue);
-        return typedDefault;
+        return Expressions.lit(defaultValue).to(type).value();
       }
 
       return null;
@@ -616,6 +674,10 @@ public class Types {
       return new NestedField(false, id, name, type, doc, initialDefault, writeDefault);
     }
 
+    /**
+     * @deprecated will be removed in 2.0.0; use {@link Builder#withId(int)} instead
+     */
+    @Deprecated
     public NestedField withFieldId(int newId) {
       return new NestedField(isOptional, newId, name, type, doc, initialDefault, writeDefault);
     }
@@ -636,20 +698,12 @@ public class Types {
       return doc;
     }
 
-    public Literal<?> initialDefaultLiteral() {
+    public Object initialDefault() {
       return initialDefault;
     }
 
-    public Object initialDefault() {
-      return initialDefault != null ? initialDefault.value() : null;
-    }
-
-    public Literal<?> writeDefaultLiteral() {
-      return writeDefault;
-    }
-
     public Object writeDefault() {
-      return writeDefault != null ? writeDefault.value() : null;
+      return writeDefault;
     }
 
     @Override
