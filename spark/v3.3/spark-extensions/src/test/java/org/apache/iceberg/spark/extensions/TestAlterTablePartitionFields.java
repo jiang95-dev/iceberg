@@ -18,49 +18,63 @@
  */
 package org.apache.iceberg.spark.extensions;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.time.LocalDateTime;
+import java.time.ZoneOffset;
+import java.util.List;
+import org.apache.iceberg.Parameter;
+import org.apache.iceberg.ParameterizedTestExtension;
+import org.apache.iceberg.Parameters;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.TestHelpers;
+import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.spark.SparkCatalogConfig;
 import org.apache.iceberg.spark.source.SparkTable;
 import org.apache.spark.sql.connector.catalog.CatalogManager;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
-import org.assertj.core.api.Assertions;
-import org.junit.After;
-import org.junit.Assert;
-import org.junit.Test;
-import org.junit.runners.Parameterized;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
 
-public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
+@ExtendWith(ParameterizedTestExtension.class)
+public class TestAlterTablePartitionFields extends ExtensionsTestBase {
 
-  @Parameterized.Parameters(name = "catalogConfig = {0}, formatVersion = {1}")
+  @Parameters(name = "catalogName = {0}, implementation = {1}, config = {2}, formatVersion = {3}")
   public static Object[][] parameters() {
     return new Object[][] {
-      {SparkCatalogConfig.HIVE, 1},
-      {SparkCatalogConfig.SPARK, 2}
+      {
+        SparkCatalogConfig.HIVE.catalogName(),
+        SparkCatalogConfig.HIVE.implementation(),
+        SparkCatalogConfig.HIVE.properties(),
+        1
+      },
+      {
+        SparkCatalogConfig.SPARK_SESSION.catalogName(),
+        SparkCatalogConfig.SPARK_SESSION.implementation(),
+        SparkCatalogConfig.SPARK_SESSION.properties(),
+        2
+      }
     };
   }
 
-  private final int formatVersion;
+  @Parameter(index = 3)
+  private int formatVersion;
 
-  public TestAlterTablePartitionFields(SparkCatalogConfig catalogConfig, int formatVersion) {
-    super(catalogConfig.catalogName(), catalogConfig.implementation(), catalogConfig.properties());
-    this.formatVersion = formatVersion;
-  }
-
-  @After
+  @AfterEach
   public void removeTable() {
     sql("DROP TABLE IF EXISTS %s", tableName);
   }
 
-  @Test
+  @TestTemplate
   public void testAddIdentityPartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD category", tableName);
 
@@ -69,15 +83,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).identity("category").build();
 
-    Assert.assertEquals("Should have new spec field", expected, table.spec());
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testAddBucketPartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD bucket(16, id)", tableName);
 
@@ -89,15 +103,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
             .bucket("id", 16, "id_bucket_16")
             .build();
 
-    Assert.assertEquals("Should have new spec field", expected, table.spec());
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testAddTruncatePartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD truncate(data, 4)", tableName);
 
@@ -109,15 +123,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
             .truncate("data", 4, "data_trunc_4")
             .build();
 
-    Assert.assertEquals("Should have new spec field", expected, table.spec());
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testAddYearsPartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD years(ts)", tableName);
 
@@ -126,15 +140,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).year("ts").build();
 
-    Assert.assertEquals("Should have new spec field", expected, table.spec());
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testAddMonthsPartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD months(ts)", tableName);
 
@@ -143,15 +157,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).month("ts").build();
 
-    Assert.assertEquals("Should have new spec field", expected, table.spec());
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testAddDaysPartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD days(ts)", tableName);
 
@@ -160,15 +174,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).day("ts").build();
 
-    Assert.assertEquals("Should have new spec field", expected, table.spec());
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testAddHoursPartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD hours(ts)", tableName);
 
@@ -177,17 +191,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).hour("ts").build();
 
-    Assert.assertEquals("Should have new spec field", expected, table.spec());
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testAddYearPartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assertions.assertThat(table.spec().isUnpartitioned())
-        .as("Table should start unpartitioned")
-        .isTrue();
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD year(ts)", tableName);
 
@@ -196,17 +208,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).year("ts").build();
 
-    Assertions.assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testAddMonthPartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assertions.assertThat(table.spec().isUnpartitioned())
-        .as("Table should start unpartitioned")
-        .isTrue();
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD month(ts)", tableName);
 
@@ -215,17 +225,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).month("ts").build();
 
-    Assertions.assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testAddDayPartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assertions.assertThat(table.spec().isUnpartitioned())
-        .as("Table should start unpartitioned")
-        .isTrue();
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD day(ts)", tableName);
 
@@ -234,17 +242,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).day("ts").build();
 
-    Assertions.assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testAddHourPartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assertions.assertThat(table.spec().isUnpartitioned())
-        .as("Table should start unpartitioned")
-        .isTrue();
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD hour(ts)", tableName);
 
@@ -253,15 +259,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).hour("ts").build();
 
-    Assertions.assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testAddNamedPartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD bucket(16, id) AS shard", tableName);
 
@@ -270,16 +276,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).bucket("id", 16, "shard").build();
 
-    Assert.assertEquals("Should have new spec field", expected, table.spec());
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testDropIdentityPartition() {
     createTable("id bigint NOT NULL, category string, data string", "category");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assert.assertEquals(
-        "Table should start with 1 partition field", 1, table.spec().fields().size());
+    assertThat(table.spec().fields()).as("Table should start with 1 partition field").hasSize(1);
 
     sql("ALTER TABLE %s DROP PARTITION FIELD category", tableName);
 
@@ -291,19 +296,18 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
               .withSpecId(1)
               .alwaysNull("category", "category")
               .build();
-      Assert.assertEquals("Should have new spec field", expected, table.spec());
+      assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
     } else {
-      Assert.assertTrue("New spec must be unpartitioned", table.spec().isUnpartitioned());
+      assertThat(table.spec().isUnpartitioned()).as("New spec must be unpartitioned").isTrue();
     }
   }
 
-  @Test
+  @TestTemplate
   public void testDropDaysPartition() {
     createTable("id bigint NOT NULL, ts timestamp, data string", "days(ts)");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assert.assertEquals(
-        "Table should start with 1 partition field", 1, table.spec().fields().size());
+    assertThat(table.spec().fields()).as("Table should start with 1 partition field").hasSize(1);
 
     sql("ALTER TABLE %s DROP PARTITION FIELD days(ts)", tableName);
 
@@ -312,19 +316,18 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     if (formatVersion == 1) {
       PartitionSpec expected =
           PartitionSpec.builderFor(table.schema()).withSpecId(1).alwaysNull("ts", "ts_day").build();
-      Assert.assertEquals("Should have new spec field", expected, table.spec());
+      assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
     } else {
-      Assert.assertTrue("New spec must be unpartitioned", table.spec().isUnpartitioned());
+      assertThat(table.spec().isUnpartitioned()).as("New spec must be unpartitioned").isTrue();
     }
   }
 
-  @Test
+  @TestTemplate
   public void testDropBucketPartition() {
     createTable("id bigint NOT NULL, data string", "bucket(16, id)");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assert.assertEquals(
-        "Table should start with 1 partition field", 1, table.spec().fields().size());
+    assertThat(table.spec().fields()).as("Table should start with 1 partition field").hasSize(1);
 
     sql("ALTER TABLE %s DROP PARTITION FIELD bucket(16, id)", tableName);
 
@@ -336,24 +339,24 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
               .withSpecId(1)
               .alwaysNull("id", "id_bucket")
               .build();
-      Assert.assertEquals("Should have new spec field", expected, table.spec());
+      assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
     } else {
-      Assert.assertTrue("New spec must be unpartitioned", table.spec().isUnpartitioned());
+      assertThat(table.spec().isUnpartitioned()).as("New spec must be unpartitioned").isTrue();
     }
   }
 
-  @Test
+  @TestTemplate
   public void testDropPartitionByName() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
 
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD bucket(16, id) AS shard", tableName);
 
     table.refresh();
 
-    Assert.assertEquals("Table should have 1 partition field", 1, table.spec().fields().size());
+    assertThat(table.spec().fields()).as("Table should have 1 partition field").hasSize(1);
 
     // Should be recognized as iceberg command even with extra white spaces
     sql("ALTER TABLE %s DROP  PARTITION \n FIELD shard", tableName);
@@ -363,23 +366,23 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     if (formatVersion == 1) {
       PartitionSpec expected =
           PartitionSpec.builderFor(table.schema()).withSpecId(2).alwaysNull("id", "shard").build();
-      Assert.assertEquals("Should have new spec field", expected, table.spec());
+      assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
     } else {
-      Assert.assertTrue("New spec must be unpartitioned", table.spec().isUnpartitioned());
+      assertThat(table.spec().isUnpartitioned()).as("New spec must be unpartitioned").isTrue();
     }
   }
 
-  @Test
+  @TestTemplate
   public void testReplacePartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD days(ts)", tableName);
     table.refresh();
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).day("ts").build();
-    Assert.assertEquals("Should have new spec field", expected, table.spec());
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
 
     sql("ALTER TABLE %s REPLACE PARTITION FIELD days(ts) WITH hours(ts)", tableName);
     table.refresh();
@@ -398,21 +401,22 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
               .addField("hour", 3, 1001, "ts_hour")
               .build();
     }
-    Assert.assertEquals(
-        "Should changed from daily to hourly partitioned field", expected, table.spec());
+    assertThat(table.spec())
+        .as("Should changed from daily to hourly partitioned field")
+        .isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testReplacePartitionAndRename() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD days(ts)", tableName);
     table.refresh();
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).day("ts").build();
-    Assert.assertEquals("Should have new spec field", expected, table.spec());
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
 
     sql("ALTER TABLE %s REPLACE PARTITION FIELD days(ts) WITH hours(ts) AS hour_col", tableName);
     table.refresh();
@@ -431,21 +435,22 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
               .addField("hour", 3, 1001, "hour_col")
               .build();
     }
-    Assert.assertEquals(
-        "Should changed from daily to hourly partitioned field", expected, table.spec());
+    assertThat(table.spec())
+        .as("Should changed from daily to hourly partitioned field")
+        .isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testReplaceNamedPartition() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD days(ts) AS day_col", tableName);
     table.refresh();
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).day("ts", "day_col").build();
-    Assert.assertEquals("Should have new spec field", expected, table.spec());
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
 
     sql("ALTER TABLE %s REPLACE PARTITION FIELD day_col WITH hours(ts)", tableName);
     table.refresh();
@@ -464,21 +469,22 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
               .addField("hour", 3, 1001, "ts_hour")
               .build();
     }
-    Assert.assertEquals(
-        "Should changed from daily to hourly partitioned field", expected, table.spec());
+    assertThat(table.spec())
+        .as("Should changed from daily to hourly partitioned field")
+        .isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testReplaceNamedPartitionAndRenameDifferently() {
     createTable("id bigint NOT NULL, category string, ts timestamp, data string");
     Table table = validationCatalog.loadTable(tableIdent);
-    Assert.assertTrue("Table should start unpartitioned", table.spec().isUnpartitioned());
+    assertThat(table.spec().isUnpartitioned()).as("Table should start unpartitioned").isTrue();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD days(ts) AS day_col", tableName);
     table.refresh();
     PartitionSpec expected =
         PartitionSpec.builderFor(table.schema()).withSpecId(1).day("ts", "day_col").build();
-    Assert.assertEquals("Should have new spec field", expected, table.spec());
+    assertThat(table.spec()).as("Should have new spec field").isEqualTo(expected);
 
     sql("ALTER TABLE %s REPLACE PARTITION FIELD day_col WITH hours(ts) AS hour_col", tableName);
     table.refresh();
@@ -497,15 +503,15 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
               .addField("hour", 3, 1001, "hour_col")
               .build();
     }
-    Assert.assertEquals(
-        "Should changed from daily to hourly partitioned field", expected, table.spec());
+    assertThat(table.spec())
+        .as("Should changed from daily to hourly partitioned field")
+        .isEqualTo(expected);
   }
 
-  @Test
+  @TestTemplate
   public void testSparkTableAddDropPartitions() throws Exception {
     createTable("id bigint NOT NULL, ts timestamp, data string");
-    Assert.assertEquals(
-        "spark table partition should be empty", 0, sparkTable().partitioning().length);
+    assertThat(sparkTable().partitioning()).as("spark table partition should be empty").isEmpty();
 
     sql("ALTER TABLE %s ADD PARTITION FIELD bucket(16, id) AS shard", tableName);
     assertPartitioningEquals(sparkTable(), 1, "bucket(16, id)");
@@ -524,11 +530,10 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
 
     sql("ALTER TABLE %s DROP PARTITION FIELD shard", tableName);
     sql("DESCRIBE %s", tableName);
-    Assert.assertEquals(
-        "spark table partition should be empty", 0, sparkTable().partitioning().length);
+    assertThat(sparkTable().partitioning()).as("spark table partition should be empty").isEmpty();
   }
 
-  @Test
+  @TestTemplate
   public void testDropColumnOfOldPartitionFieldV1() {
     // default table created in v1 format
     sql(
@@ -540,7 +545,7 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
     sql("ALTER TABLE %s DROP COLUMN day_of_ts", tableName);
   }
 
-  @Test
+  @TestTemplate
   public void testDropColumnOfOldPartitionFieldV2() {
     sql(
         "CREATE TABLE %s (id bigint NOT NULL, ts timestamp, day_of_ts date) USING iceberg PARTITIONED BY (day_of_ts) TBLPROPERTIES('format-version' = '2')",
@@ -552,11 +557,11 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
   }
 
   private void assertPartitioningEquals(SparkTable table, int len, String transform) {
-    Assert.assertEquals("spark table partition should be " + len, len, table.partitioning().length);
-    Assert.assertEquals(
-        "latest spark table partition transform should match",
-        transform,
-        table.partitioning()[len - 1].toString());
+    assertThat(table.partitioning()).as("spark table partition should be " + len).hasSize(len);
+    assertThat(table.partitioning()[len - 1])
+        .asString()
+        .as("latest spark table partition transform should match")
+        .isEqualTo(transform);
   }
 
   private SparkTable sparkTable() throws Exception {
@@ -581,5 +586,65 @@ public class TestAlterTablePartitionFields extends SparkExtensionsTestBase {
           "CREATE TABLE %s (%s) USING iceberg PARTITIONED BY (%s) TBLPROPERTIES ('%s' '%d')",
           tableName, schema, spec, TableProperties.FORMAT_VERSION, formatVersion);
     }
+  }
+
+  private void runCreateAndDropPartitionField(
+      String column, String partitionType, List<Object[]> expected, String predicate) {
+    sql("DROP TABLE IF EXISTS %s", tableName);
+    sql(
+        "CREATE TABLE %s (col_int INTEGER, col_ts TIMESTAMP_NTZ, col_long BIGINT) USING ICEBERG TBLPROPERTIES ('format-version' = %d)",
+        tableName, formatVersion);
+    sql("INSERT INTO %s VALUES (1000, CAST('2024-03-01 19:25:00' as TIMESTAMP), 2100)", tableName);
+    sql("ALTER TABLE %s ADD PARTITION FIELD %s AS col2_partition", tableName, partitionType);
+    sql("INSERT INTO %s VALUES (2000, CAST('2024-04-01 19:25:00' as TIMESTAMP), 2200)", tableName);
+    sql("ALTER TABLE %s DROP PARTITION FIELD col2_partition", tableName);
+    sql("INSERT INTO %s VALUES (3000, CAST('2024-05-01 19:25:00' as TIMESTAMP), 2300)", tableName);
+    sql("ALTER TABLE %s DROP COLUMN %s", tableName, column);
+
+    assertThat(sql("SELECT * FROM %s WHERE %s ORDER BY col_int", tableName, predicate))
+        .containsExactlyElementsOf(expected);
+  }
+
+  @TestTemplate
+  public void testDropPartitionAndSourceColumnLong() {
+    String predicateTs = "col_long >= 2200";
+    List<Object[]> expectedTs =
+        Lists.newArrayList(new Object[] {2000, 2200L}, new Object[] {3000, 2300L});
+    runCreateAndDropPartitionField("col_ts", "col_ts", expectedTs, predicateTs);
+    runCreateAndDropPartitionField("col_ts", "year(col_ts)", expectedTs, predicateTs);
+    runCreateAndDropPartitionField("col_ts", "month(col_ts)", expectedTs, predicateTs);
+    runCreateAndDropPartitionField("col_ts", "day(col_ts)", expectedTs, predicateTs);
+  }
+
+  @TestTemplate
+  public void testDropPartitionAndSourceColumnTimestamp() {
+    String predicate = "col_ts >= '2024-04-01 19:25:00'";
+    List<Object[]> expected =
+        Lists.newArrayList(
+            new Object[] {2000, LocalDateTime.ofEpochSecond(1711999500, 0, ZoneOffset.UTC)},
+            new Object[] {3000, LocalDateTime.ofEpochSecond(1714591500, 0, ZoneOffset.UTC)});
+    runCreateAndDropPartitionField("col_long", "col_long", expected, predicate);
+    runCreateAndDropPartitionField("col_long", "truncate(2, col_long)", expected, predicate);
+    runCreateAndDropPartitionField("col_long", "bucket(16, col_long)", expected, predicate);
+  }
+
+  @TestTemplate
+  public void deleteAfterDroppingPartitionAndSourceColumn() {
+    sql("DROP TABLE IF EXISTS %s", tableName);
+    sql(
+        "CREATE TABLE %s (id INTEGER, data STRING) USING ICEBERG TBLPROPERTIES ('format-version' = %d)",
+        tableName, formatVersion);
+    sql("INSERT INTO %s VALUES (1, 'data1')", tableName);
+    sql("ALTER TABLE %s ADD PARTITION FIELD data", tableName);
+    sql("INSERT INTO %s VALUES (2, 'data2')", tableName);
+    sql("ALTER TABLE %s DROP PARTITION FIELD data", tableName);
+    sql("INSERT INTO %s VALUES (3, 'data3')", tableName);
+    sql("ALTER TABLE %s DROP COLUMN data", tableName);
+
+    assertThat(sql("SELECT * FROM %s WHERE id >= 1 ORDER BY id", tableName))
+        .containsExactly(row(1), row(2), row(3));
+
+    sql("DELETE FROM %s WHERE id >= 1", tableName);
+    assertThat(sql("SELECT * FROM %s WHERE id >= 1", tableName)).isEmpty();
   }
 }
