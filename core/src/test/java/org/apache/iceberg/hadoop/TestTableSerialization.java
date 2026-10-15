@@ -18,6 +18,8 @@
  */
 package org.apache.iceberg.hadoop;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -29,6 +31,7 @@ import java.util.Set;
 import org.apache.iceberg.FileScanTask;
 import org.apache.iceberg.HasTableOperations;
 import org.apache.iceberg.MetadataTableType;
+import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.PositionDeletesScanTask;
 import org.apache.iceberg.PositionDeletesTable;
 import org.apache.iceberg.ScanTask;
@@ -37,12 +40,14 @@ import org.apache.iceberg.Table;
 import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.TestHelpers;
 import org.apache.iceberg.Transaction;
+import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 import org.apache.iceberg.types.Types;
 import org.junit.Assert;
 import org.junit.Test;
+import org.mockito.Mockito;
 
 public class TestTableSerialization extends HadoopTableTestBase {
 
@@ -83,6 +88,62 @@ public class TestTableSerialization extends HadoopTableTestBase {
 
     // txn tables have metadata locations as null so we check only serialized metadata
     TestHelpers.assertSerializedMetadata(txn.table(), TestHelpers.roundTripSerialize(txn.table()));
+  }
+
+  @Test
+  public void testSerializableReplacementDroppingPartitionSourceV1()
+      throws IOException, ClassNotFoundException {
+    checkSerializableReplacementDroppingPartitionSource(1);
+  }
+
+  @Test
+  public void testSerializableReplacementDroppingPartitionSourceV2()
+      throws IOException, ClassNotFoundException {
+    checkSerializableReplacementDroppingPartitionSource(2);
+  }
+
+  private void checkSerializableReplacementDroppingPartitionSource(int formatVersion)
+      throws IOException, ClassNotFoundException {
+    table
+        .updateProperties()
+        .set(TableProperties.FORMAT_VERSION, String.valueOf(formatVersion))
+        .commit();
+    PartitionSpec oldSpec = table.spec();
+    Transaction txn =
+        TABLES
+            .buildTable(tableLocation, table.schema().select("id"))
+            .withPartitionSpec(PartitionSpec.unpartitioned())
+            .replaceTransaction();
+    Table replacement = txn.table();
+
+    Assert.assertNull(
+        "Partition source column must be dropped", replacement.schema().findField("data"));
+    Assert.assertTrue("Replacement must be unpartitioned", replacement.spec().isUnpartitioned());
+    Assert.assertEquals(
+        "Historical spec must be retained", oldSpec, replacement.specs().get(oldSpec.specId()));
+
+    Table serializableTable = SerializableTable.copyOf(replacement);
+    Table javaCopy = TestHelpers.roundTripSerialize(serializableTable);
+    Table kryoCopy = TestHelpers.KryoHelpers.roundTripSerialize(serializableTable);
+
+    // Staged replacements have no metadata file, so specs must be restored from serialized JSON.
+    TestHelpers.assertSerializedMetadata(replacement, javaCopy);
+    Assert.assertEquals(
+        "All specs must survive Java serialization", replacement.specs(), javaCopy.specs());
+    TestHelpers.assertSerializedMetadata(replacement, kryoCopy);
+    Assert.assertEquals(
+        "All specs must survive Kryo serialization", replacement.specs(), kryoCopy.specs());
+  }
+
+  @Test
+  public void testSerializableTableValidatesDefaultSpec() {
+    Table invalidTable = Mockito.spy(table);
+    Mockito.doReturn(table.schema().select("id")).when(invalidTable).schema();
+    Table serializableTable = SerializableTable.copyOf(invalidTable);
+
+    assertThatThrownBy(serializableTable::specs)
+        .isInstanceOf(ValidationException.class)
+        .hasMessageContaining("Cannot find source column for partition field");
   }
 
   @Test

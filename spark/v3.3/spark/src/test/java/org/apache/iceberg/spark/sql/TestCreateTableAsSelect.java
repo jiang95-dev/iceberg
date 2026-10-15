@@ -354,6 +354,47 @@ public class TestCreateTableAsSelect extends SparkCatalogTestBase {
   }
 
   @Test
+  public void testCreateRTASDroppingPartitionSourceV1() {
+    checkCreateRTASDroppingPartitionSource(1);
+  }
+
+  @Test
+  public void testCreateRTASDroppingPartitionSourceV2() {
+    checkCreateRTASDroppingPartitionSource(2);
+  }
+
+  private void checkCreateRTASDroppingPartitionSource(int formatVersion) {
+    sql(
+        "CREATE TABLE %s (id bigint, data string) USING iceberg PARTITIONED BY (id) "
+            + "TBLPROPERTIES ('format-version'='%s')",
+        tableName, formatVersion);
+    sql("INSERT INTO %s VALUES (1, 'a'), (2, 'b')", tableName);
+    PartitionSpec oldSpec = validationCatalog.loadTable(tableIdent).spec();
+
+    sql("CREATE OR REPLACE TABLE %s USING iceberg AS SELECT data FROM %s", tableName, tableName);
+
+    Table replacement = validationCatalog.loadTable(tableIdent);
+    Assert.assertNull(
+        "Partition source column must be dropped", replacement.schema().findField("id"));
+    Assert.assertTrue("Replacement must be unpartitioned", replacement.spec().isUnpartitioned());
+    Assert.assertEquals(
+        "Historical spec must be retained", oldSpec, replacement.specs().get(oldSpec.specId()));
+    assertEquals(
+        "Replacement must preserve the selected data",
+        sql("SELECT 'a' UNION ALL SELECT 'b' ORDER BY 1"),
+        sql("SELECT data FROM %s ORDER BY data", tableName));
+    sql("INSERT INTO %s VALUES ('c')", tableName);
+    assertEquals(
+        "Replacement must support subsequent writes and reads",
+        sql("SELECT 'a' UNION ALL SELECT 'b' UNION ALL SELECT 'c' ORDER BY 1"),
+        sql("SELECT data FROM %s ORDER BY data", tableName));
+    assertEquals(
+        "Dropped partition metadata must be null",
+        sql("SELECT CAST(NULL AS BIGINT) FROM %s", tableName),
+        sql("SELECT _partition.id FROM %s", tableName));
+  }
+
+  @Test
   public void testCreateRTASWithPartitionSpecChanging() {
     sql(
         "CREATE OR REPLACE TABLE %s USING iceberg PARTITIONED BY (part) AS "

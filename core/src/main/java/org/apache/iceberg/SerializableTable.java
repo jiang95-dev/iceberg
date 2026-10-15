@@ -27,6 +27,7 @@ import org.apache.iceberg.hadoop.HadoopConfigurable;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.LocationProvider;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
+import org.apache.iceberg.util.JsonUtil;
 import org.apache.iceberg.util.SerializableMap;
 import org.apache.iceberg.util.SerializableSupplier;
 
@@ -39,6 +40,9 @@ import org.apache.iceberg.util.SerializableSupplier;
  * <p>While this class captures the metadata file location that can be used to load the complete
  * table metadata, it directly persists the current schema, spec, sort order, table properties to
  * avoid reading the metadata file from other nodes for frequently needed metadata.
+ *
+ * <p>Only the default partition spec is validated against the current schema. Historical specs may
+ * reference source columns that have been dropped.
  *
  * <p>The implementation assumes the passed instances of {@link FileIO}, {@link EncryptionManager},
  * {@link LocationProvider} are serializable. If you are serializing the table using a custom
@@ -189,7 +193,14 @@ public class SerializableTable implements Table, Serializable {
           Map<Integer, PartitionSpec> specs = Maps.newHashMapWithExpectedSize(specAsJsonMap.size());
           specAsJsonMap.forEach(
               (specId, specAsJson) -> {
-                specs.put(specId, PartitionSpecParser.fromJson(schema(), specAsJson));
+                UnboundPartitionSpec unboundSpec =
+                    JsonUtil.parse(specAsJson, PartitionSpecParser::fromJson);
+                // Historical specs may reference columns that are no longer in the current schema.
+                PartitionSpec spec =
+                    specId == defaultSpecId
+                        ? unboundSpec.bind(schema())
+                        : unboundSpec.bindUnchecked(schema());
+                specs.put(specId, spec);
               });
           this.lazySpecs = specs;
         } else if (lazySpecs == null) {

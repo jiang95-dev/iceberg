@@ -64,6 +64,29 @@ public class TestPartitioning {
   }
 
   @Test
+  public void testPartitionTypeWithDroppedSourceInV1Table() {
+    checkPartitionTypeWithDroppedSource(V1_FORMAT_VERSION);
+  }
+
+  @Test
+  public void testPartitionTypeWithDroppedSourceInV2Table() {
+    checkPartitionTypeWithDroppedSource(V2_FORMAT_VERSION);
+  }
+
+  private void checkPartitionTypeWithDroppedSource(int formatVersion) {
+    PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).identity("id").build();
+    TestTables.TestTable table = TestTables.create(tableDir, "test", SCHEMA, spec, formatVersion);
+    table.updateSpec().removeField("id").commit();
+    table.updateSchema().deleteColumn("id").commit();
+
+    Assert.assertNull("Source column must be absent", table.schema().findField("id"));
+    Assert.assertEquals(
+        "Partition type must retain the historical source type",
+        StructType.of(NestedField.optional(1000, "id", Types.IntegerType.get())),
+        Partitioning.partitionType(table));
+  }
+
+  @Test
   public void testPartitionTypeWithSpecEvolutionInV1Tables() {
     TestTables.TestTable table =
         TestTables.create(tableDir, "test", SCHEMA, BY_DATA_SPEC, V1_FORMAT_VERSION);

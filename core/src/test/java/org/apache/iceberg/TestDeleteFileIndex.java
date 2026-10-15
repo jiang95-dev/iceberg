@@ -88,6 +88,29 @@ public class TestDeleteFileIndex extends TableTestBase {
   }
 
   @Test
+  public void testUnusedSpecWithDroppedSource() {
+    PartitionSpec oldSpec =
+        PartitionSpec.builderFor(SCHEMA)
+            .identity("data")
+            .build()
+            .toUnbound()
+            .bindUnchecked(SCHEMA.select("id"));
+    PartitionSpec currentSpec = PartitionSpec.builderFor(SCHEMA.select("id")).withSpecId(1).build();
+    DeleteFileIndex index =
+        new DeleteFileIndex(
+            ImmutableMap.of(oldSpec.specId(), oldSpec, currentSpec.specId(), currentSpec),
+            null,
+            null,
+            ImmutableMap.of());
+
+    Assert.assertTrue("Index should contain no deletes", index.isEmpty());
+    Assert.assertEquals(
+        "Unused historical spec must not prevent reading current files",
+        0,
+        index.forDataFile(0, unpartitionedFile(currentSpec)).length);
+  }
+
+  @Test
   public void testUnpartitionedDeletes() {
     PartitionSpec partSpec = PartitionSpec.unpartitioned();
     DeleteFileIndex index =

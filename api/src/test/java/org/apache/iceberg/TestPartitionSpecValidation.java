@@ -35,6 +35,30 @@ public class TestPartitionSpecValidation {
           NestedField.required(6, "s", Types.StringType.get()));
 
   @Test
+  public void testVoidPartitionWithDroppedSource() {
+    PartitionSpec spec =
+        PartitionSpec.builderFor(SCHEMA.select("s"))
+            .add(1, 1000, "id", Transforms.alwaysNull())
+            .build();
+
+    Assert.assertTrue("Void partition must be unpartitioned", spec.isUnpartitioned());
+    Assert.assertEquals(
+        "Missing source uses a nullable string carrier",
+        Types.StructType.of(NestedField.optional(1000, "id", Types.StringType.get())),
+        spec.partitionType());
+    Assert.assertArrayEquals(new Class<?>[] {CharSequence.class}, spec.javaClasses());
+    Assert.assertEquals("id=null", spec.partitionToPath(TestHelpers.Row.of((Object) null)));
+  }
+
+  @Test
+  public void testVoidPartitionPreservesKnownSourceType() {
+    PartitionSpec spec = PartitionSpec.builderFor(SCHEMA).alwaysNull("id").build();
+
+    Assert.assertEquals(Types.LongType.get(), spec.partitionType().fields().get(0).type());
+    Assert.assertArrayEquals(new Class<?>[] {Long.class}, spec.javaClasses());
+  }
+
+  @Test
   public void testMultipleTimestampPartitions() {
     AssertHelpers.assertThrows(
         "Should not allow year(ts) and year(ts)",
