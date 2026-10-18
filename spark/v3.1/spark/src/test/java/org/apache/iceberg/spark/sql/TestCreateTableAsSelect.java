@@ -370,6 +370,7 @@ public class TestCreateTableAsSelect extends SparkCatalogTestBase {
         tableName, formatVersion);
     sql("INSERT INTO %s VALUES (1, 'a'), (2, 'b')", tableName);
     PartitionSpec oldSpec = validationCatalog.loadTable(tableIdent).spec();
+    long oldSnapshotId = validationCatalog.loadTable(tableIdent).currentSnapshot().snapshotId();
 
     sql("CREATE OR REPLACE TABLE %s USING iceberg AS SELECT data FROM %s", tableName, tableName);
 
@@ -388,6 +389,24 @@ public class TestCreateTableAsSelect extends SparkCatalogTestBase {
         "Replacement must support subsequent writes and reads",
         sql("SELECT 'a' UNION ALL SELECT 'b' UNION ALL SELECT 'c' ORDER BY 1"),
         sql("SELECT data FROM %s ORDER BY data", tableName));
+    spark
+        .read()
+        .format("iceberg")
+        .option("snapshot-id", oldSnapshotId)
+        .load(tableName)
+        .createOrReplaceTempView("rtas_history");
+    try {
+      assertEquals(
+          "Old snapshot must remain readable after dropping its partition source",
+          sql("SELECT 1L, 'a' UNION ALL SELECT 2L, 'b' ORDER BY 1"),
+          sql("SELECT id, data FROM rtas_history ORDER BY id"));
+      assertEquals(
+          "Historical partition filters must work",
+          sql("SELECT 1L, 'a'"),
+          sql("SELECT id, data FROM rtas_history WHERE id = 1"));
+    } finally {
+      spark.catalog().dropTempView("rtas_history");
+    }
   }
 
   @Test

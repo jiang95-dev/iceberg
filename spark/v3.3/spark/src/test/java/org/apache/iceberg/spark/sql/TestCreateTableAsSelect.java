@@ -364,12 +364,30 @@ public class TestCreateTableAsSelect extends SparkCatalogTestBase {
   }
 
   private void checkCreateRTASDroppingPartitionSource(int formatVersion) {
+    checkCreateRTASDroppingPartitionSource(formatVersion, "id");
+  }
+
+  @Test
+  public void testHistoricalSnapshotsWithPartitionTransforms() {
+    for (int formatVersion : new int[] {1, 2}) {
+      for (String partitioning : new String[] {"bucket(8, id)", "truncate(10, id)"}) {
+        try {
+          checkCreateRTASDroppingPartitionSource(formatVersion, partitioning);
+        } finally {
+          sql("DROP TABLE IF EXISTS %s", tableName);
+        }
+      }
+    }
+  }
+
+  private void checkCreateRTASDroppingPartitionSource(int formatVersion, String partitioning) {
     sql(
-        "CREATE TABLE %s (id bigint, data string) USING iceberg PARTITIONED BY (id) "
+        "CREATE TABLE %s (id bigint, data string) USING iceberg PARTITIONED BY (%s) "
             + "TBLPROPERTIES ('format-version'='%s')",
-        tableName, formatVersion);
+        tableName, partitioning, formatVersion);
     sql("INSERT INTO %s VALUES (1, 'a'), (2, 'b')", tableName);
     PartitionSpec oldSpec = validationCatalog.loadTable(tableIdent).spec();
+    long oldSnapshotId = validationCatalog.loadTable(tableIdent).currentSnapshot().snapshotId();
 
     sql("CREATE OR REPLACE TABLE %s USING iceberg AS SELECT data FROM %s", tableName, tableName);
 
@@ -391,7 +409,25 @@ public class TestCreateTableAsSelect extends SparkCatalogTestBase {
     assertEquals(
         "Dropped partition metadata must be null",
         sql("SELECT CAST(NULL AS BIGINT) FROM %s", tableName),
-        sql("SELECT _partition.id FROM %s", tableName));
+        sql("SELECT _partition.`%s` FROM %s", oldSpec.fields().get(0).name(), tableName));
+    spark
+        .read()
+        .format("iceberg")
+        .option("snapshot-id", oldSnapshotId)
+        .load(tableName)
+        .createOrReplaceTempView("rtas_history");
+    try {
+      assertEquals(
+          "Old snapshot must remain readable after dropping its partition source",
+          sql("SELECT 1L, 'a' UNION ALL SELECT 2L, 'b' ORDER BY 1"),
+          sql("SELECT id, data FROM rtas_history ORDER BY id"));
+      assertEquals(
+          "Historical partition filters must work",
+          sql("SELECT 1L, 'a'"),
+          sql("SELECT id, data FROM rtas_history WHERE id = 1"));
+    } finally {
+      spark.catalog().dropTempView("rtas_history");
+    }
   }
 
   @Test

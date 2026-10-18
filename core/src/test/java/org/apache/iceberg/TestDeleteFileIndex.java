@@ -94,7 +94,9 @@ public class TestDeleteFileIndex extends TableTestBase {
             .identity("data")
             .build()
             .toUnbound()
-            .bindUnchecked(SCHEMA.select("id"));
+            .bindUnchecked(SCHEMA.select("id"))
+            .withHistoricalSourceTypes(
+                ImmutableMap.of(SCHEMA.findField("data").fieldId(), SCHEMA.findType("data")));
     PartitionSpec currentSpec = PartitionSpec.builderFor(SCHEMA.select("id")).withSpecId(1).build();
     DeleteFileIndex index =
         new DeleteFileIndex(
@@ -108,6 +110,41 @@ public class TestDeleteFileIndex extends TableTestBase {
         "Unused historical spec must not prevent reading current files",
         0,
         index.forDataFile(0, unpartitionedFile(currentSpec)).length);
+  }
+
+  @Test
+  public void testPositionDeletesForHistoricalSpecWithDroppedSource() {
+    PartitionSpec oldSpec =
+        PartitionSpec.builderFor(SCHEMA).identity("data").build().withSchema(SCHEMA.select("id"));
+    PartitionSpec currentSpec = PartitionSpec.builderFor(SCHEMA.select("id")).withSpecId(1).build();
+    StructLike partition = TestHelpers.Row.of("old");
+    DataFile dataFile =
+        DataFiles.builder(oldSpec)
+            .withPath("/old.parquet")
+            .withPartition(partition)
+            .withFileSizeInBytes(10)
+            .withRecordCount(1)
+            .build();
+    DeleteFile deleteFile =
+        FileMetadata.deleteFileBuilder(oldSpec)
+            .ofPositionDeletes()
+            .withPath("/old-deletes.parquet")
+            .withPartition(partition)
+            .withFileSizeInBytes(10)
+            .withRecordCount(1)
+            .build();
+    DeleteFileIndex index =
+        new DeleteFileIndex(
+            ImmutableMap.of(oldSpec.specId(), oldSpec, currentSpec.specId(), currentSpec),
+            null,
+            null,
+            ImmutableMap.of(
+                Pair.of(
+                    oldSpec.specId(),
+                    StructLikeWrapper.forType(oldSpec.partitionType()).set(partition)),
+                Pair.of(new long[] {2}, new DeleteFile[] {deleteFile})));
+    Assert.assertArrayEquals(new DeleteFile[] {deleteFile}, index.forDataFile(1, dataFile));
+    Assert.assertEquals(0, index.forDataFile(3, dataFile).length);
   }
 
   @Test

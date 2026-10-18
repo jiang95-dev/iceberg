@@ -30,6 +30,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
+import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.relocated.com.google.common.collect.ListMultimap;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
@@ -53,6 +54,9 @@ public class PartitionSpec implements Serializable {
   private static final int PARTITION_DATA_ID_START = 1000;
 
   private final Schema schema;
+  // Types for source IDs absent from schema; these do not reintroduce columns into the table
+  // schema.
+  private final Map<Integer, Type> historicalSourceTypes;
 
   // this is ordered so that DataFile has a consistent schema
   private final int specId;
@@ -65,7 +69,17 @@ public class PartitionSpec implements Serializable {
 
   private PartitionSpec(
       Schema schema, int specId, List<PartitionField> fields, int lastAssignedFieldId) {
+    this(schema, specId, fields, lastAssignedFieldId, ImmutableMap.of());
+  }
+
+  private PartitionSpec(
+      Schema schema,
+      int specId,
+      List<PartitionField> fields,
+      int lastAssignedFieldId,
+      Map<Integer, Type> historicalSourceTypes) {
     this.schema = schema;
+    this.historicalSourceTypes = Maps.newHashMap(historicalSourceTypes);
     this.specId = specId;
     this.fields = fields.toArray(new PartitionField[0]);
     this.lastAssignedFieldId = lastAssignedFieldId;
@@ -74,6 +88,39 @@ public class PartitionSpec implements Serializable {
   /** Returns the {@link Schema} for this spec. */
   public Schema schema() {
     return schema;
+  }
+
+  PartitionSpec withHistoricalSourceTypes(Map<Integer, Type> sourceTypes) {
+    return new PartitionSpec(schema, specId, fields(), lastAssignedFieldId, sourceTypes);
+  }
+
+  Map<Integer, Type> historicalSourceTypes() {
+    return ImmutableMap.copyOf(historicalSourceTypes);
+  }
+
+  PartitionSpec withSchema(Schema newSchema) {
+    Map<Integer, Type> sourceTypes = Maps.newHashMap(historicalSourceTypes);
+    for (PartitionField field : fields) {
+      Type type = schema.findType(field.sourceId());
+      if (newSchema.findType(field.sourceId()) == null && type != null) {
+        sourceTypes.put(field.sourceId(), type);
+      }
+    }
+    return toUnbound().bindUnchecked(newSchema).withHistoricalSourceTypes(sourceTypes);
+  }
+
+  private Type resultType(PartitionField field) {
+    Type sourceType = schema.findType(field.sourceId());
+    if (sourceType == null) {
+      sourceType = historicalSourceTypes.get(field.sourceId());
+    }
+    Type resultType = field.transform().getResultType(sourceType);
+    ValidationException.check(
+        resultType != null,
+        "Cannot determine partition type for spec %s, field %s: missing source type",
+        specId,
+        field);
+    return resultType;
   }
 
   /** Returns the ID of this spec. */
@@ -127,9 +174,8 @@ public class PartitionSpec implements Serializable {
           List<Types.NestedField> structFields = Lists.newArrayListWithExpectedSize(fields.length);
 
           for (PartitionField field : fields) {
-            Type sourceType = schema.findType(field.sourceId());
-            Type resultType = field.transform().getResultType(sourceType);
-            structFields.add(Types.NestedField.optional(field.fieldId(), field.name(), resultType));
+            structFields.add(
+                Types.NestedField.optional(field.fieldId(), field.name(), resultType(field)));
           }
 
           this.lazyPartitionType = Types.StructType.of(structFields);
@@ -150,8 +196,7 @@ public class PartitionSpec implements Serializable {
             if (field.transform() instanceof UnknownTransform) {
               classes[i] = Object.class;
             } else {
-              Type sourceType = schema.findType(field.sourceId());
-              Type result = field.transform().getResultType(sourceType);
+              Type result = resultType(field);
               classes[i] = result.typeId().javaClass();
             }
           }

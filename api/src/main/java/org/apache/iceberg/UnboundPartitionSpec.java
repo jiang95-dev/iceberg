@@ -47,11 +47,17 @@ public class UnboundPartitionSpec {
   }
 
   PartitionSpec bindUnchecked(Schema schema) {
-    return copyToBuilder(schema).buildUnchecked();
+    // Historical partition names may collide with newly added columns with different source IDs.
+    return copyToBuilder(schema, false).buildUnchecked();
   }
 
   private PartitionSpec.Builder copyToBuilder(Schema schema) {
-    PartitionSpec.Builder builder = PartitionSpec.builderFor(schema).withSpecId(specId);
+    return copyToBuilder(schema, true);
+  }
+
+  private PartitionSpec.Builder copyToBuilder(Schema schema, boolean checkConflicts) {
+    PartitionSpec.Builder builder =
+        PartitionSpec.builderFor(schema).withSpecId(specId).checkConflicts(checkConflicts);
 
     for (UnboundPartitionField field : fields) {
       Type fieldType = schema.findType(field.sourceId);

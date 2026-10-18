@@ -22,9 +22,7 @@ import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
 import java.util.Set;
-import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 import org.apache.iceberg.exceptions.ValidationException;
 import org.apache.iceberg.expressions.Expressions;
@@ -237,8 +235,7 @@ public class Partitioning {
    * @return the constructed grouping key type
    */
   public static StructType groupingKeyType(Schema schema, Collection<PartitionSpec> specs) {
-    return buildPartitionProjectionType(
-        "grouping key", specs, commonActiveFieldIds(schema, specs), sourceId -> null);
+    return buildPartitionProjectionType("grouping key", specs, commonActiveFieldIds(schema, specs));
   }
 
   /**
@@ -249,31 +246,16 @@ public class Partitioning {
    * part of any spec in the table. In other words, the struct fields represent a union of all known
    * partition fields.
    *
-   * <p>Source types for dropped columns are recovered from the most recent schema containing them.
-   *
    * @param table a table with one or many specs
    * @return the constructed unified partition type
    */
   public static StructType partitionType(Table table) {
     Collection<PartitionSpec> specs = table.specs().values();
-    return buildPartitionProjectionType(
-        "table partition",
-        specs,
-        allFieldIds(specs),
-        sourceId ->
-            table.schemas().values().stream()
-                .sorted(Comparator.comparingInt(Schema::schemaId).reversed())
-                .map(schema -> schema.findType(sourceId))
-                .filter(Objects::nonNull)
-                .findFirst()
-                .orElse(null));
+    return buildPartitionProjectionType("table partition", specs, allFieldIds(specs));
   }
 
   private static StructType buildPartitionProjectionType(
-      String typeName,
-      Collection<PartitionSpec> specs,
-      Set<Integer> projectedFieldIds,
-      IntFunction<Type> historicalSourceType) {
+      String typeName, Collection<PartitionSpec> specs, Set<Integer> projectedFieldIds) {
 
     // we currently don't know the output type of unknown transforms
     List<Transform<?, ?>> unknownTransforms = collectUnknownTransforms(specs);
@@ -301,23 +283,13 @@ public class Partitioning {
           continue;
         }
 
-        Type sourceType = spec.schema().findType(field.sourceId());
-        if (sourceType == null) {
-          // RTAS may drop a source column while keeping its partition field in historical specs.
-          sourceType = historicalSourceType.apply(field.sourceId());
-        }
-        Type resultType = field.transform().getResultType(sourceType);
-        ValidationException.check(
-            resultType != null,
-            "Cannot determine %s type for partition field: %s",
-            typeName,
-            field);
+        NestedField structField = spec.partitionType().field(fieldId);
         PartitionField existingField = fieldMap.get(fieldId);
 
         if (existingField == null) {
           fieldMap.put(fieldId, field);
-          typeMap.put(fieldId, resultType);
-          nameMap.put(fieldId, field.name());
+          typeMap.put(fieldId, structField.type());
+          nameMap.put(fieldId, structField.name());
 
         } else {
           // verify the fields are compatible as they may conflict in v1 tables
@@ -330,7 +302,7 @@ public class Partitioning {
           // use the correct type for dropped partitions in v1 tables
           if (isVoidTransform(existingField) && !isVoidTransform(field)) {
             fieldMap.put(fieldId, field);
-            typeMap.put(fieldId, resultType);
+            typeMap.put(fieldId, structField.type());
           }
         }
       }

@@ -27,7 +27,6 @@ import org.apache.iceberg.hadoop.HadoopConfigurable;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.io.LocationProvider;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
-import org.apache.iceberg.util.JsonUtil;
 import org.apache.iceberg.util.SerializableMap;
 import org.apache.iceberg.util.SerializableSupplier;
 
@@ -42,7 +41,7 @@ import org.apache.iceberg.util.SerializableSupplier;
  * avoid reading the metadata file from other nodes for frequently needed metadata.
  *
  * <p>Only the default partition spec is validated against the current schema. Historical specs may
- * reference source columns that have been dropped.
+ * reference source columns that have been dropped; their source types are captured with the specs.
  *
  * <p>The implementation assumes the passed instances of {@link FileIO}, {@link EncryptionManager},
  * {@link LocationProvider} are serializable. If you are serializing the table using a custom
@@ -81,7 +80,9 @@ public class SerializableTable implements Table, Serializable {
     this.defaultSpecId = table.spec().specId();
     this.specAsJsonMap = Maps.newHashMap();
     Map<Integer, PartitionSpec> specs = table.specs();
-    specs.forEach((specId, spec) -> specAsJsonMap.put(specId, PartitionSpecParser.toJson(spec)));
+    specs.forEach(
+        (specId, spec) ->
+            specAsJsonMap.put(specId, PartitionSpecParser.toJsonWithHistoricalSourceTypes(spec)));
     this.sortOrderAsJson = SortOrderParser.toJson(table.sortOrder());
     this.io = fileIO(table);
     this.encryption = table.encryption();
@@ -193,13 +194,11 @@ public class SerializableTable implements Table, Serializable {
           Map<Integer, PartitionSpec> specs = Maps.newHashMapWithExpectedSize(specAsJsonMap.size());
           specAsJsonMap.forEach(
               (specId, specAsJson) -> {
-                UnboundPartitionSpec unboundSpec =
-                    JsonUtil.parse(specAsJson, PartitionSpecParser::fromJson);
-                // Historical specs may reference columns that are no longer in the current schema.
                 PartitionSpec spec =
-                    specId == defaultSpecId
-                        ? unboundSpec.bind(schema())
-                        : unboundSpec.bindUnchecked(schema());
+                    PartitionSpecParser.fromJsonWithHistoricalSourceTypes(schema(), specAsJson);
+                if (specId == defaultSpecId) {
+                  spec.toUnbound().bind(schema());
+                }
                 specs.put(specId, spec);
               });
           this.lazySpecs = specs;

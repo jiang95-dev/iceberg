@@ -57,7 +57,9 @@ abstract class BaseContentScanTask<ThisT extends ContentScanTask<F>, F extends C
     if (spec == null) {
       synchronized (this) {
         if (spec == null) {
-          this.spec = PartitionSpecParser.fromJson(SchemaParser.fromJson(schemaString), specString);
+          this.spec =
+              PartitionSpecParser.fromJsonWithHistoricalSourceTypes(
+                  SchemaParser.fromJson(schemaString), specString);
         }
       }
     }

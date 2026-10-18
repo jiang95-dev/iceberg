@@ -1113,6 +1113,159 @@ public class TestTableMetadata {
   }
 
   @Test
+  public void testHistoricalPartitionTypesAfterReplacement() throws Exception {
+    for (int formatVersion : new int[] {1, 2}) {
+      Schema schema =
+          new Schema(
+              Types.NestedField.required(1, "id", Types.IntegerType.get()),
+              Types.NestedField.required(2, "data", Types.StringType.get()));
+      for (PartitionSpec spec :
+          Arrays.asList(
+              PartitionSpec.builderFor(schema).identity("id").build(),
+              PartitionSpec.builderFor(schema).bucket("id", 16).build(),
+              PartitionSpec.builderFor(schema).truncate("id", 10).build(),
+              PartitionSpec.builderFor(schema).identity("data").build(),
+              PartitionSpec.builderFor(schema).truncate("data", 2).build())) {
+        TableMetadata metadata =
+            TableMetadata.newTableMetadata(
+                schema,
+                spec,
+                SortOrder.unsorted(),
+                "file:/table",
+                ImmutableMap.of(),
+                formatVersion);
+        Schema replacementSchema =
+            new Schema(Types.NestedField.optional(1, "new_column", Types.LongType.get()));
+        TableMetadata replaced =
+            metadata.buildReplacement(
+                replacementSchema,
+                PartitionSpec.unpartitioned(),
+                SortOrder.unsorted(),
+                metadata.location(),
+                ImmutableMap.of());
+        // Reuse the old column name with a different type and a newly allocated ID.
+        Schema reusedName =
+            new Schema(
+                Types.NestedField.optional(1, "new_column", Types.LongType.get()),
+                Types.NestedField.optional(2, "id", Types.StringType.get()));
+        replaced =
+            replaced.buildReplacement(
+                reusedName,
+                PartitionSpec.unpartitioned(),
+                SortOrder.unsorted(),
+                metadata.location(),
+                ImmutableMap.of());
+        TableMetadata parsed = TableMetadataParser.fromJson(TableMetadataParser.toJson(replaced));
+        for (TableMetadata state : Arrays.asList(replaced, parsed)) {
+          PartitionSpec historical = state.specsById().get(0);
+          Assert.assertEquals(spec.partitionType(), historical.partitionType());
+          Assert.assertArrayEquals(spec.javaClasses(), historical.javaClasses());
+          Assert.assertEquals(
+              "The spec schema remains the current table schema",
+              state.schema().asStruct(),
+              historical.schema().asStruct());
+          PartitionSpec restored =
+              PartitionSpecParser.fromJsonWithHistoricalSourceTypes(
+                  state.schema(), PartitionSpecParser.toJsonWithHistoricalSourceTypes(historical));
+          Assert.assertEquals(spec.partitionType(), restored.partitionType());
+          Assert.assertEquals(
+              "Persistent spec JSON must not include internal source types",
+              PartitionSpecParser.toJson(spec),
+              PartitionSpecParser.toJson(historical));
+        }
+      }
+    }
+  }
+
+  @Test
+  public void testIncompatibleHistoricalPartitionTypesAreRejected() {
+    Schema initial = new Schema(Types.NestedField.required(1, "id", Types.LongType.get()));
+    TableMetadata metadata =
+        TableMetadata.newTableMetadata(
+            initial,
+            PartitionSpec.builderFor(initial).identity("id").build(),
+            SortOrder.unsorted(),
+            "file:/table",
+            ImmutableMap.of(),
+            2);
+    TableMetadata changed =
+        metadata.buildReplacement(
+            new Schema(Types.NestedField.required(1, "id", Types.StringType.get())),
+            PartitionSpec.unpartitioned(),
+            SortOrder.unsorted(),
+            metadata.location(),
+            ImmutableMap.of());
+    org.assertj.core.api.Assertions.assertThatThrownBy(
+            () ->
+                changed.buildReplacement(
+                    new Schema(Types.NestedField.optional(1, "other", Types.LongType.get())),
+                    PartitionSpec.unpartitioned(),
+                    SortOrder.unsorted(),
+                    changed.location(),
+                    ImmutableMap.of()))
+        .isInstanceOf(ValidationException.class)
+        .hasMessageContaining("incompatible historical types");
+  }
+
+  @Test
+  public void testHistoricalNestedPartitionSource() {
+    Schema schema =
+        new Schema(
+            Types.NestedField.optional(
+                1,
+                "nested",
+                Types.StructType.of(Types.NestedField.optional(2, "id", Types.LongType.get()))),
+            Types.NestedField.optional(3, "data", Types.StringType.get()));
+    PartitionSpec spec = PartitionSpec.builderFor(schema).identity("nested.id").build();
+    TableMetadata metadata =
+        TableMetadata.newTableMetadata(
+            schema, spec, SortOrder.unsorted(), "file:/table", ImmutableMap.of(), 2);
+    metadata =
+        metadata.buildReplacement(
+            metadata.schema().select("data"),
+            PartitionSpec.unpartitioned(),
+            SortOrder.unsorted(),
+            metadata.location(),
+            ImmutableMap.of());
+    TableMetadata restored = TableMetadataParser.fromJson(TableMetadataParser.toJson(metadata));
+    Assert.assertEquals(spec.partitionType(), restored.specsById().get(0).partitionType());
+    Assert.assertNull(restored.schema().findField("nested"));
+  }
+
+  @Test
+  public void testHistoricalPartitionTypeAfterPromotionAndRename() {
+    Schema initial = new Schema(Types.NestedField.required(1, "id", Types.IntegerType.get()));
+    TableMetadata metadata =
+        TableMetadata.newTableMetadata(
+            initial,
+            PartitionSpec.builderFor(initial).identity("id").build(),
+            SortOrder.unsorted(),
+            "file:/table",
+            ImmutableMap.of(),
+            2);
+    Schema promoted = new Schema(Types.NestedField.required(1, "renamed", Types.LongType.get()));
+    metadata = metadata.updateSchema(promoted, metadata.lastColumnId());
+    metadata =
+        metadata.buildReplacement(
+            new Schema(Types.NestedField.optional(1, "other", Types.StringType.get())),
+            PartitionSpec.unpartitioned(),
+            SortOrder.unsorted(),
+            metadata.location(),
+            ImmutableMap.of());
+    Assert.assertEquals(
+        Types.LongType.get(), metadata.specsById().get(0).partitionType().fields().get(0).type());
+    Assert.assertEquals(
+        Types.LongType.get(),
+        TableMetadataParser.fromJson(TableMetadataParser.toJson(metadata))
+            .specsById()
+            .get(0)
+            .partitionType()
+            .fields()
+            .get(0)
+            .type());
+  }
+
+  @Test
   public void testBuildReplacementForV1Table() {
     Schema schema =
         new Schema(

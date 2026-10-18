@@ -23,7 +23,6 @@ import java.io.Serializable;
 import org.apache.iceberg.expressions.BoundPredicate;
 import org.apache.iceberg.expressions.UnboundPredicate;
 import org.apache.iceberg.types.Type;
-import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.SerializableFunction;
 
 class VoidTransform<S> implements Transform<S, Void> {
@@ -67,8 +66,7 @@ class VoidTransform<S> implements Transform<S, Void> {
 
   @Override
   public Type getResultType(Type sourceType) {
-    // A dropped source has no type, but void values are always null and can use a string carrier.
-    return sourceType != null ? sourceType : Types.StringType.get();
+    return sourceType;
   }
 
   @Override

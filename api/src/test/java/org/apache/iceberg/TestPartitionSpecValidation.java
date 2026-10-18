@@ -18,6 +18,10 @@
  */
 package org.apache.iceberg;
 
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+import org.apache.iceberg.exceptions.ValidationException;
+import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.transforms.Transforms;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.types.Types.NestedField;
@@ -39,14 +43,15 @@ public class TestPartitionSpecValidation {
     PartitionSpec spec =
         PartitionSpec.builderFor(SCHEMA.select("s"))
             .add(1, 1000, "id", Transforms.alwaysNull())
-            .build();
+            .build()
+            .withHistoricalSourceTypes(ImmutableMap.of(1, Types.LongType.get()));
 
     Assert.assertTrue("Void partition must be unpartitioned", spec.isUnpartitioned());
     Assert.assertEquals(
-        "Missing source uses a nullable string carrier",
-        Types.StructType.of(NestedField.optional(1000, "id", Types.StringType.get())),
+        "Missing source retains its historical type",
+        Types.StructType.of(NestedField.optional(1000, "id", Types.LongType.get())),
         spec.partitionType());
-    Assert.assertArrayEquals(new Class<?>[] {CharSequence.class}, spec.javaClasses());
+    Assert.assertArrayEquals(new Class<?>[] {Long.class}, spec.javaClasses());
     Assert.assertEquals("id=null", spec.partitionToPath(TestHelpers.Row.of((Object) null)));
   }
 
@@ -56,6 +61,17 @@ public class TestPartitionSpecValidation {
 
     Assert.assertEquals(Types.LongType.get(), spec.partitionType().fields().get(0).type());
     Assert.assertArrayEquals(new Class<?>[] {Long.class}, spec.javaClasses());
+  }
+
+  @Test
+  public void testMissingSourceTypeFailsExplicitly() {
+    PartitionSpec spec =
+        PartitionSpec.builderFor(SCHEMA.select("s"))
+            .add(1, 1000, "id", Transforms.alwaysNull())
+            .build();
+    assertThatThrownBy(spec::partitionType)
+        .isInstanceOf(ValidationException.class)
+        .hasMessageContaining("missing source type");
   }
 
   @Test

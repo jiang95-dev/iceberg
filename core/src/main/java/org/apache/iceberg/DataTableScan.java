@@ -22,6 +22,7 @@ import java.util.List;
 import org.apache.iceberg.io.CloseableIterable;
 import org.apache.iceberg.io.FileIO;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
+import org.apache.iceberg.relocated.com.google.common.collect.ImmutableMap;
 import org.apache.iceberg.util.SnapshotUtil;
 
 public class DataTableScan extends BaseTableScan {
@@ -93,12 +94,15 @@ public class DataTableScan extends BaseTableScan {
     List<ManifestFile> deleteManifests = snapshot.deleteManifests(io);
     scanMetrics().totalDataManifests().increment((long) dataManifests.size());
     scanMetrics().totalDeleteManifests().increment((long) deleteManifests.size());
+    ImmutableMap.Builder<Integer, PartitionSpec> scanSpecs = ImmutableMap.builder();
+    // Time-travel predicates must bind to the selected snapshot's schema, not today's schema.
+    table().specs().forEach((id, spec) -> scanSpecs.put(id, spec.withSchema(tableSchema())));
     ManifestGroup manifestGroup =
         new ManifestGroup(io, dataManifests, deleteManifests)
             .caseSensitive(isCaseSensitive())
             .select(scanColumns())
             .filterData(filter())
-            .specsById(table().specs())
+            .specsById(scanSpecs.build())
             .scanMetrics(scanMetrics())
             .ignoreDeleted();
 

@@ -20,6 +20,7 @@ package org.apache.iceberg;
 
 import java.io.Serializable;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -40,7 +41,9 @@ import org.apache.iceberg.relocated.com.google.common.collect.Lists;
 import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 import org.apache.iceberg.transforms.Transforms;
+import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.TypeUtil;
+import org.apache.iceberg.types.Types.NestedField;
 import org.apache.iceberg.util.LocationUtil;
 import org.apache.iceberg.util.Pair;
 import org.apache.iceberg.util.PropertyUtil;
@@ -301,7 +304,7 @@ public class TableMetadata implements Serializable {
     this.lastColumnId = lastColumnId;
     this.currentSchemaId = currentSchemaId;
     this.schemas = schemas;
-    this.specs = specs;
+    this.specs = ImmutableList.copyOf(restorePartitionSourceTypes(specs, schemas));
     this.defaultSpecId = defaultSpecId;
     this.lastAssignedPartitionId = lastAssignedPartitionId;
     this.defaultSortOrderId = defaultSortOrderId;
@@ -319,7 +322,7 @@ public class TableMetadata implements Serializable {
 
     this.snapshotsById = indexAndValidateSnapshots(snapshots, lastSequenceNumber);
     this.schemasById = indexSchemas();
-    this.specsById = indexSpecs(specs);
+    this.specsById = indexSpecs(this.specs);
     this.sortOrdersById = indexSortOrders(sortOrders);
     this.refs = validateRefs(currentSnapshotId, refs, snapshotsById);
     this.statisticsFiles = ImmutableList.copyOf(statisticsFiles);
@@ -634,8 +637,10 @@ public class TableMetadata implements Serializable {
               newField.sourceId(), field.fieldId(), newField.name(), newField.transform());
         } else {
           // Rename old void transforms that would otherwise conflict
+          NestedField sameNameColumn = partitionSpec.schema().findField(field.name());
           String voidName =
               newFieldNames.contains(field.name())
+                      || (sameNameColumn != null && sameNameColumn.fieldId() != field.sourceId())
                   ? field.name() + "_" + field.fieldId()
                   : field.name();
           specBuilder.add(field.sourceId(), field.fieldId(), voidName, Transforms.alwaysNull());
@@ -702,9 +707,45 @@ public class TableMetadata implements Serializable {
     return new Builder(this).upgradeFormatVersion(newFormatVersion).build();
   }
 
+  private static List<PartitionSpec> restorePartitionSourceTypes(
+      List<PartitionSpec> specs, List<Schema> schemas) {
+    // Resolve by ID, not name: a dropped column's name may have been reused for a different type.
+    List<Schema> newestFirst =
+        schemas.stream()
+            .sorted(Comparator.comparingInt(Schema::schemaId).reversed())
+            .collect(Collectors.toList());
+    return specs.stream()
+        .map(
+            spec -> {
+              Map<Integer, Type> sourceTypes = Maps.newHashMap();
+              for (PartitionField field : spec.fields()) {
+                if (spec.schema().findType(field.sourceId()) == null) {
+                  for (Schema historicalSchema : newestFirst) {
+                    Type type = historicalSchema.findType(field.sourceId());
+                    if (type != null) {
+                      Type resolved = sourceTypes.putIfAbsent(field.sourceId(), type);
+                      ValidationException.check(
+                          resolved == null
+                              || resolved.equals(type)
+                              || (resolved.isPrimitiveType()
+                                  && TypeUtil.isPromotionAllowed(type, resolved.asPrimitiveType())),
+                          "Cannot recover partition source type for spec %s, source %s: incompatible historical types %s and %s",
+                          spec.specId(),
+                          field.sourceId(),
+                          type,
+                          resolved);
+                    }
+                  }
+                }
+              }
+              return spec.withHistoricalSourceTypes(sourceTypes);
+            })
+        .collect(Collectors.toList());
+  }
+
   private static PartitionSpec updateSpecSchema(Schema schema, PartitionSpec partitionSpec) {
     PartitionSpec.Builder specBuilder =
-        PartitionSpec.builderFor(schema).withSpecId(partitionSpec.specId());
+        PartitionSpec.builderFor(schema).withSpecId(partitionSpec.specId()).checkConflicts(false);
 
     // add all the fields to the builder. IDs should not change.
     for (PartitionField field : partitionSpec.fields()) {

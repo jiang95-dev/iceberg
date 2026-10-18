@@ -27,7 +27,7 @@ import org.junit.Test;
 
 public class TestPartitionSet {
   @Test
-  public void testUnusedSpecWithDroppedSource() {
+  public void testHistoricalSpecWithDroppedSource() {
     Schema schema =
         new Schema(
             Types.NestedField.required(1, "id", Types.LongType.get()),
@@ -37,7 +37,8 @@ public class TestPartitionSet {
             .identity("data")
             .build()
             .toUnbound()
-            .bindUnchecked(schema.select("id"));
+            .bindUnchecked(schema.select("id"))
+            .withHistoricalSourceTypes(ImmutableMap.of(2, Types.StringType.get()));
     PartitionSpec currentSpec =
         PartitionSpec.builderFor(schema.select("id")).identity("id").withSpecId(1).build();
     PartitionSet partitions =
@@ -55,5 +56,8 @@ public class TestPartitionSet {
     Assert.assertEquals("[id=1]", partitions.toString());
     Assert.assertTrue(partitions.remove(currentSpec.specId(), TestHelpers.Row.of(1L)));
     Assert.assertTrue(partitions.isEmpty());
+    Assert.assertTrue(partitions.add(oldSpec.specId(), TestHelpers.Row.of("old")));
+    Assert.assertTrue(partitions.contains(oldSpec.specId(), TestHelpers.Row.of("old")));
+    Assert.assertTrue(partitions.remove(oldSpec.specId(), TestHelpers.Row.of("old")));
   }
 }

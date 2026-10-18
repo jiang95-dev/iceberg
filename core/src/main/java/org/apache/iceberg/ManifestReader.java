@@ -27,6 +27,7 @@ import java.util.Map;
 import java.util.Set;
 import org.apache.iceberg.avro.Avro;
 import org.apache.iceberg.avro.AvroIterable;
+import org.apache.iceberg.avro.AvroSchemaUtil;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.expressions.Evaluator;
 import org.apache.iceberg.expressions.Expression;
@@ -42,7 +43,9 @@ import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableList;
 import org.apache.iceberg.relocated.com.google.common.collect.ImmutableSet;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
+import org.apache.iceberg.relocated.com.google.common.collect.Maps;
 import org.apache.iceberg.relocated.com.google.common.collect.Sets;
+import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.PartitionSet;
 
@@ -127,7 +130,26 @@ public class ManifestReader<F extends ContentFile<F>> extends CloseableGroup
     }
 
     Schema schema = SchemaParser.fromJson(metadata.get("schema"));
-    return PartitionSpecParser.fromJsonFields(schema, specId, metadata.get("partition-spec"));
+    PartitionSpec manifestSpec =
+        PartitionSpecParser.fromJsonFieldsUnchecked(schema, specId, metadata.get("partition-spec"));
+    Map<Integer, Type> sourceTypes = Maps.newHashMap();
+    for (PartitionField field : manifestSpec.fields()) {
+      if (schema.findType(field.sourceId()) == null
+          && field.transform().getResultType(null) == null) {
+        // Identity, truncate and void preserve the source type, recorded in the Avro partition.
+        org.apache.avro.Schema avroSchema =
+            new org.apache.avro.Schema.Parser().parse(metadata.get("avro.schema"));
+        Schema entrySchema = new Schema(AvroSchemaUtil.convert(avroSchema).asStructType().fields());
+        Type type =
+            entrySchema
+                .findType(DataFile.PARTITION_ID)
+                .asStructType()
+                .field(field.fieldId())
+                .type();
+        sourceTypes.put(field.sourceId(), type);
+      }
+    }
+    return manifestSpec.withHistoricalSourceTypes(sourceTypes);
   }
 
   private static <T extends ContentFile<T>> Map<String, String> readMetadata(InputFile inputFile) {

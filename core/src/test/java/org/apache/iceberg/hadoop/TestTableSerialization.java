@@ -26,17 +26,30 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.io.UncheckedIOException;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
+import org.apache.iceberg.DataFile;
+import org.apache.iceberg.DataFiles;
 import org.apache.iceberg.FileScanTask;
+import org.apache.iceberg.Files;
 import org.apache.iceberg.HasTableOperations;
+import org.apache.iceberg.ManifestFile;
+import org.apache.iceberg.ManifestFiles;
+import org.apache.iceberg.ManifestReader;
+import org.apache.iceberg.ManifestWriter;
 import org.apache.iceberg.MetadataTableType;
+import org.apache.iceberg.PartitionData;
 import org.apache.iceberg.PartitionSpec;
 import org.apache.iceberg.PositionDeletesScanTask;
 import org.apache.iceberg.PositionDeletesTable;
 import org.apache.iceberg.ScanTask;
+import org.apache.iceberg.Schema;
 import org.apache.iceberg.SerializableTable;
+import org.apache.iceberg.SortOrder;
 import org.apache.iceberg.Table;
+import org.apache.iceberg.TableMetadata;
 import org.apache.iceberg.TableProperties;
 import org.apache.iceberg.TestHelpers;
 import org.apache.iceberg.Transaction;
@@ -108,6 +121,7 @@ public class TestTableSerialization extends HadoopTableTestBase {
         .updateProperties()
         .set(TableProperties.FORMAT_VERSION, String.valueOf(formatVersion))
         .commit();
+    table.updateSpec().removeField("data_bucket").addField("data").commit();
     PartitionSpec oldSpec = table.spec();
     Transaction txn =
         TABLES
@@ -133,6 +147,117 @@ public class TestTableSerialization extends HadoopTableTestBase {
     TestHelpers.assertSerializedMetadata(replacement, kryoCopy);
     Assert.assertEquals(
         "All specs must survive Kryo serialization", replacement.specs(), kryoCopy.specs());
+    for (Table copy : Arrays.asList(replacement, javaCopy, kryoCopy)) {
+      Assert.assertEquals(
+          "Historical partition types must be usable",
+          oldSpec.partitionType(),
+          copy.specs().get(oldSpec.specId()).partitionType());
+      Assert.assertArrayEquals(
+          oldSpec.javaClasses(), copy.specs().get(oldSpec.specId()).javaClasses());
+    }
+    txn.commitTransaction();
+    Table reloaded = TABLES.load(tableLocation);
+    Assert.assertEquals(
+        oldSpec.partitionType(), reloaded.specs().get(oldSpec.specId()).partitionType());
+    Table loadedCopy = TestHelpers.roundTripSerialize(SerializableTable.copyOf(reloaded));
+    loadedCopy.schemas();
+    Assert.assertEquals(
+        oldSpec.partitionType(), loadedCopy.specs().get(oldSpec.specId()).partitionType());
+    DataFile dataFile =
+        DataFiles.builder(reloaded.spec())
+            .withPath("/path/to/replacement.parquet")
+            .withPartition(new PartitionData(reloaded.spec().partitionType()))
+            .withRecordCount(1)
+            .withFileSizeInBytes(10)
+            .build();
+    reloaded.newAppend().appendFile(dataFile).commit();
+    try (ManifestReader<DataFile> reader =
+        ManifestFiles.read(
+            reloaded.currentSnapshot().dataManifests(reloaded.io()).get(0), reloaded.io())) {
+      Assert.assertEquals(
+          "Standalone manifests preserve void partition types",
+          reloaded.spec().partitionType(),
+          reader.spec().partitionType());
+    }
+  }
+
+  @Test
+  public void testStandaloneHistoricalManifests() throws IOException {
+    Schema schema = table.schema();
+    for (int formatVersion : new int[] {1, 2}) {
+      for (PartitionSpec original :
+          Arrays.asList(
+              PartitionSpec.builderFor(schema).identity("data").build(),
+              PartitionSpec.builderFor(schema).truncate("data", 2).build(),
+              PartitionSpec.builderFor(schema).bucket("data", 16).build())) {
+        TableMetadata metadata =
+            TableMetadata.newTableMetadata(
+                schema,
+                original,
+                SortOrder.unsorted(),
+                table.location(),
+                Collections.singletonMap(
+                    TableProperties.FORMAT_VERSION, String.valueOf(formatVersion)));
+        PartitionSpec historical =
+            metadata
+                .buildReplacement(
+                    schema.select("id"),
+                    PartitionSpec.unpartitioned(),
+                    SortOrder.unsorted(),
+                    table.location(),
+                    Collections.emptyMap())
+                .specsById()
+                .get(0);
+        Object value =
+            original.fields().get(0).transform().toString().startsWith("bucket") ? 1 : "ab";
+        DataFile dataFile =
+            DataFiles.builder(historical)
+                .withPath("/historical.parquet")
+                .withPartition(TestHelpers.Row.of(value))
+                .withRecordCount(1)
+                .withFileSizeInBytes(10)
+                .build();
+        ManifestWriter<DataFile> writer =
+            ManifestFiles.write(
+                formatVersion,
+                historical,
+                Files.localOutput(
+                    temp.newFile(
+                        formatVersion + "-" + original.fields().get(0).transform() + ".avro")),
+                1L);
+        try (ManifestWriter<DataFile> closeable = writer) {
+          closeable.add(dataFile);
+        }
+        ManifestFile manifest = writer.toManifestFile();
+        try (ManifestReader<DataFile> reader = ManifestFiles.read(manifest, table.io())) {
+          Assert.assertEquals(original.partitionType(), reader.spec().partitionType());
+          Assert.assertEquals(value, reader.iterator().next().partition().get(0, Object.class));
+        }
+      }
+    }
+  }
+
+  @Test
+  public void testScanTaskSerializationWithDroppedPartitionSource()
+      throws IOException, ClassNotFoundException {
+    table.updateProperties().set(TableProperties.FORMAT_VERSION, "2").commit();
+    table.newAppend().appendFile(FILE_A).commit();
+    PartitionSpec oldSpec = table.spec();
+    table.updateSpec().removeField("data_bucket").commit();
+    table.updateSchema().deleteColumn("data").commit();
+    try (CloseableIterable<FileScanTask> tasks = table.newScan().planFiles()) {
+      FileScanTask task = tasks.iterator().next();
+      for (FileScanTask copy :
+          Arrays.asList(
+              TestHelpers.roundTripSerialize(task),
+              TestHelpers.KryoHelpers.roundTripSerialize(task))) {
+        Assert.assertEquals(oldSpec.partitionType(), copy.spec().partitionType());
+        Assert.assertArrayEquals(oldSpec.javaClasses(), copy.spec().javaClasses());
+        Assert.assertEquals(
+            oldSpec.partitionToPath(FILE_A.partition()),
+            copy.spec().partitionToPath(copy.file().partition()));
+      }
+    }
   }
 
   @Test

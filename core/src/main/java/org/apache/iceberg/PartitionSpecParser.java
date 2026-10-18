@@ -24,7 +24,11 @@ import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.Map;
+import java.util.stream.Collectors;
 import org.apache.iceberg.relocated.com.google.common.base.Preconditions;
+import org.apache.iceberg.relocated.com.google.common.collect.Maps;
+import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.JsonUtil;
 import org.apache.iceberg.util.Pair;
@@ -38,6 +42,48 @@ public class PartitionSpecParser {
   private static final String FIELD_ID = "field-id";
   private static final String TRANSFORM = "transform";
   private static final String NAME = "name";
+  private static final String HISTORICAL_SOURCE_TYPES = "historical-source-types";
+
+  // Internal task/broadcast payload only. The table and manifest spec JSON formats stay unchanged.
+  static String toJsonWithHistoricalSourceTypes(PartitionSpec spec) {
+    if (spec.historicalSourceTypes().isEmpty()) {
+      return toJson(spec);
+    }
+    return JsonUtil.generate(
+        generator -> {
+          generator.writeStartObject();
+          generator.writeFieldName("spec");
+          toJson(spec, generator);
+          generator.writeFieldName(HISTORICAL_SOURCE_TYPES);
+          Schema sourceSchema =
+              new Schema(
+                  spec.historicalSourceTypes().entrySet().stream()
+                      .sorted(Map.Entry.comparingByKey())
+                      .map(
+                          entry ->
+                              Types.NestedField.optional(
+                                  entry.getKey(), "source_" + entry.getKey(), entry.getValue()))
+                      .collect(Collectors.toList()));
+          SchemaParser.toJson(sourceSchema, generator);
+          generator.writeEndObject();
+        },
+        false);
+  }
+
+  static PartitionSpec fromJsonWithHistoricalSourceTypes(Schema schema, String json) {
+    return JsonUtil.parse(
+        json,
+        node -> {
+          if (!node.has(HISTORICAL_SOURCE_TYPES)) {
+            return fromJson(node).bindUnchecked(schema);
+          }
+          UnboundPartitionSpec unbound = fromJson(JsonUtil.get("spec", node));
+          Schema sourceSchema = SchemaParser.fromJson(JsonUtil.get(HISTORICAL_SOURCE_TYPES, node));
+          Map<Integer, Type> sourceTypes = Maps.newHashMap();
+          sourceSchema.columns().forEach(field -> sourceTypes.put(field.fieldId(), field.type()));
+          return unbound.bindUnchecked(schema).withHistoricalSourceTypes(sourceTypes);
+        });
+  }
 
   public static void toJson(PartitionSpec spec, JsonGenerator generator) throws IOException {
     toJson(spec.toUnbound(), generator);
@@ -117,6 +163,16 @@ public class PartitionSpecParser {
 
   static PartitionSpec fromJsonFields(Schema schema, int specId, String json) {
     return JsonUtil.parse(json, node -> PartitionSpecParser.fromJsonFields(schema, specId, node));
+  }
+
+  static PartitionSpec fromJsonFieldsUnchecked(Schema schema, int specId, String json) {
+    return JsonUtil.parse(
+        json,
+        node -> {
+          UnboundPartitionSpec.Builder builder = UnboundPartitionSpec.builder().withSpecId(specId);
+          buildFromJsonFields(builder, node);
+          return builder.build().bindUnchecked(schema);
+        });
   }
 
   private static void buildFromJsonFields(UnboundPartitionSpec.Builder builder, JsonNode json) {

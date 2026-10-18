@@ -41,9 +41,9 @@ public class PartitionSet implements Set<Pair<Integer, StructLike>> {
   private final Map<Integer, Set<StructLike>> partitionSetById;
 
   private PartitionSet(Map<Integer, PartitionSpec> specsById) {
-    // Only resolve types for specs in use; historical specs may reference dropped source columns.
-    this.partitionTypeById =
-        Maps.transformValues(ImmutableMap.copyOf(specsById), PartitionSpec::partitionType);
+    ImmutableMap.Builder<Integer, Types.StructType> builder = ImmutableMap.builder();
+    specsById.forEach((specId, spec) -> builder.put(specId, spec.partitionType()));
+    this.partitionTypeById = builder.build();
     this.partitionSetById = Maps.newHashMap();
   }
 

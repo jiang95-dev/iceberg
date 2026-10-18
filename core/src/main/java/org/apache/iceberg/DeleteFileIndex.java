@@ -80,9 +80,9 @@ class DeleteFileIndex {
       DeleteFile[] globalDeletes,
       Map<Pair<Integer, StructLikeWrapper>, Pair<long[], DeleteFile[]>> sortedDeletesByPartition) {
     this.specsById = specsById;
-    // Historical specs with dropped source columns need no type unless their files are accessed.
-    this.partitionTypeById =
-        Maps.transformValues(ImmutableMap.copyOf(specsById), PartitionSpec::partitionType);
+    ImmutableMap.Builder<Integer, Types.StructType> builder = ImmutableMap.builder();
+    specsById.forEach((specId, spec) -> builder.put(specId, spec.partitionType()));
+    this.partitionTypeById = builder.build();
     this.wrapperById = Maps.newConcurrentMap();
     this.globalSeqs = globalSeqs;
     this.globalDeletes = globalDeletes;

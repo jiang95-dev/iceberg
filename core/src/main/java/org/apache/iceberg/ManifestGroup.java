@@ -381,7 +381,7 @@ class ManifestGroup {
         boolean dropStats,
         ScanMetrics scanMetrics) {
       this.schemaAsString = SchemaParser.toJson(spec.schema());
-      this.specAsString = PartitionSpecParser.toJson(spec);
+      this.specAsString = PartitionSpecParser.toJsonWithHistoricalSourceTypes(spec);
       this.deletes = deletes;
       this.residuals = residuals;
       this.dropStats = dropStats;
