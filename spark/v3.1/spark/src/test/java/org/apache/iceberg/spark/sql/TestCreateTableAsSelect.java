@@ -364,10 +364,27 @@ public class TestCreateTableAsSelect extends SparkCatalogTestBase {
   }
 
   private void checkCreateRTASDroppingPartitionSource(int formatVersion) {
+    checkCreateRTASDroppingPartitionSource(formatVersion, "id");
+  }
+
+  @Test
+  public void testHistoricalSnapshotsWithPartitionTransforms() {
+    for (int formatVersion : new int[] {1, 2}) {
+      for (String partitioning : new String[] {"bucket(8, id)", "truncate(10, id)"}) {
+        try {
+          checkCreateRTASDroppingPartitionSource(formatVersion, partitioning);
+        } finally {
+          sql("DROP TABLE IF EXISTS %s", tableName);
+        }
+      }
+    }
+  }
+
+  private void checkCreateRTASDroppingPartitionSource(int formatVersion, String partitioning) {
     sql(
-        "CREATE TABLE %s (id bigint, data string) USING iceberg PARTITIONED BY (id) "
+        "CREATE TABLE %s (id bigint, data string) USING iceberg PARTITIONED BY (%s) "
             + "TBLPROPERTIES ('format-version'='%s')",
-        tableName, formatVersion);
+        tableName, partitioning, formatVersion);
     sql("INSERT INTO %s VALUES (1, 'a'), (2, 'b')", tableName);
     PartitionSpec oldSpec = validationCatalog.loadTable(tableIdent).spec();
     long oldSnapshotId = validationCatalog.loadTable(tableIdent).currentSnapshot().snapshotId();
@@ -389,6 +406,10 @@ public class TestCreateTableAsSelect extends SparkCatalogTestBase {
         "Replacement must support subsequent writes and reads",
         sql("SELECT 'a' UNION ALL SELECT 'b' UNION ALL SELECT 'c' ORDER BY 1"),
         sql("SELECT data FROM %s ORDER BY data", tableName));
+    assertEquals(
+        "Dropped partition metadata must be null",
+        sql("SELECT CAST(NULL AS BIGINT) FROM %s", tableName),
+        sql("SELECT _partition.`%s` FROM %s", oldSpec.fields().get(0).name(), tableName));
     spark
         .read()
         .format("iceberg")
