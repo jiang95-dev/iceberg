@@ -18,19 +18,14 @@
  */
 package org.apache.iceberg;
 
-import static org.apache.iceberg.types.Types.NestedField.optional;
 import static org.apache.iceberg.types.Types.NestedField.required;
 import static org.assertj.core.api.Assertions.assertThat;
 
-import java.io.IOException;
 import java.math.BigDecimal;
 import java.nio.ByteBuffer;
 import java.util.UUID;
 import java.util.stream.Stream;
-import org.apache.iceberg.data.DataTest;
 import org.apache.iceberg.expressions.Literal;
-import org.apache.iceberg.relocated.com.google.common.collect.Lists;
-import org.apache.iceberg.relocated.com.google.common.collect.Sets;
 import org.apache.iceberg.types.Type;
 import org.apache.iceberg.types.Types;
 import org.apache.iceberg.util.DateTimeUtil;
@@ -39,49 +34,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-public class TestSchemaParser extends DataTest {
-  @Override
-  protected boolean supportsUnknown() {
-    return true;
-  }
-
-  @Override
-  protected boolean supportsTimestampNanos() {
-    return true;
-  }
-
-  @Override
-  protected boolean supportsVariant() {
-    return true;
-  }
-
-  @Override
-  protected void writeAndValidate(Schema schema) throws IOException {
-    Schema serialized = SchemaParser.fromJson(SchemaParser.toJson(schema));
-    assertThat(serialized.asStruct()).isEqualTo(schema.asStruct());
-  }
-
-  @Test
-  public void testSchemaId() {
-    Schema schema = new Schema(34, required(1, "id", Types.LongType.get()));
-
-    Schema serialized = SchemaParser.fromJson(SchemaParser.toJson(schema));
-    assertThat(serialized.schemaId()).isEqualTo(schema.schemaId());
-  }
-
-  @Test
-  public void testIdentifierColumns() {
-    Schema schema =
-        new Schema(
-            Lists.newArrayList(
-                required(1, "id-1", Types.LongType.get()),
-                required(2, "id-2", Types.LongType.get()),
-                optional(3, "data", Types.StringType.get())),
-            Sets.newHashSet(1, 2));
-
-    Schema serialized = SchemaParser.fromJson(SchemaParser.toJson(schema));
-    assertThat(serialized.identifierFieldIds()).isEqualTo(Sets.newHashSet(1, 2));
-  }
+public class TestSchemaParser {
 
   @Test
   public void testDocStrings() {

@@ -32,9 +32,6 @@ import java.util.UUID;
 import org.apache.iceberg.exceptions.RuntimeIOException;
 import org.apache.iceberg.expressions.Literal;
 import org.apache.iceberg.util.UUIDUtil;
-import org.apache.iceberg.variants.Variant;
-import org.apache.iceberg.variants.VariantMetadata;
-import org.apache.iceberg.variants.VariantValue;
 
 public class Conversions {
 
@@ -100,7 +97,6 @@ public class Conversions {
       case LONG:
       case TIME:
       case TIMESTAMP:
-      case TIMESTAMP_NANO:
         return ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN).putLong(0, (long) value);
       case FLOAT:
         return ByteBuffer.allocate(4).order(ByteOrder.LITTLE_ENDIAN).putFloat(0, (float) value);
@@ -120,19 +116,7 @@ public class Conversions {
         return (ByteBuffer) value;
       case DECIMAL:
         return ByteBuffer.wrap(((BigDecimal) value).unscaledValue().toByteArray());
-      case VARIANT:
-        // Produce a concatenated buffer of metadata and value
-        Variant variant = (Variant) value;
-        VariantMetadata variantMetadata = variant.metadata();
-        VariantValue variantValue = variant.value();
-        ByteBuffer variantBuffer =
-            ByteBuffer.allocate(variantMetadata.sizeInBytes() + variantValue.sizeInBytes())
-                .order(ByteOrder.LITTLE_ENDIAN);
-        variantMetadata.writeTo(variantBuffer, 0);
-        variantValue.writeTo(variantBuffer, variantMetadata.sizeInBytes());
-        return variantBuffer;
       case UNKNOWN:
-        // underlying type not known
         return null;
       default:
         throw new UnsupportedOperationException("Cannot serialize type: " + typeId);
@@ -164,7 +148,6 @@ public class Conversions {
       case LONG:
       case TIME:
       case TIMESTAMP:
-      case TIMESTAMP_NANO:
         if (tmp.remaining() < 8) {
           // type was later promoted to long
           return (long) tmp.getInt();
@@ -194,10 +177,7 @@ public class Conversions {
         byte[] unscaledBytes = new byte[buffer.remaining()];
         tmp.get(unscaledBytes);
         return new BigDecimal(new BigInteger(unscaledBytes), decimal.scale());
-      case VARIANT:
-        return Variant.from(tmp);
       case UNKNOWN:
-        // underlying type not known
         return null;
       default:
         throw new UnsupportedOperationException("Cannot deserialize type: " + type);

@@ -16,94 +16,49 @@
  * specific language governing permissions and limitations
  * under the License.
  */
-package org.apache.iceberg.avro;
+package org.apache.iceberg.spark.data;
 
+import static org.apache.iceberg.spark.data.TestHelpers.assertEqualsUnsafe;
+
+import java.io.File;
 import java.io.IOException;
 import java.util.List;
-import org.apache.iceberg.InternalTestHelpers;
-import org.apache.iceberg.PartitionSpec;
-import org.apache.iceberg.RandomInternalData;
+import org.apache.avro.generic.GenericData.Record;
+import org.apache.iceberg.Files;
 import org.apache.iceberg.Schema;
-import org.apache.iceberg.data.DataTest;
-import org.apache.iceberg.data.Record;
-import org.apache.iceberg.inmemory.InMemoryOutputFile;
-import org.apache.iceberg.io.DataWriter;
-import org.apache.iceberg.io.OutputFile;
+import org.apache.iceberg.avro.Avro;
+import org.apache.iceberg.avro.AvroIterable;
+import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
+import org.apache.spark.sql.catalyst.InternalRow;
+import org.junit.Assert;
 
-public class TestInternalAvro extends DataTest {
-  @Override
-  protected boolean supportsDefaultValues() {
-    return true;
-  }
-
-  @Override
-  protected boolean supportsUnknown() {
-    return true;
-  }
-
-  @Override
-  protected boolean supportsTimestampNanos() {
-    return true;
-  }
-
+public class TestSparkAvroReader extends AvroDataTest {
   @Override
   protected void writeAndValidate(Schema schema) throws IOException {
-    List<Record> expected = RandomInternalData.generate(schema, 100, 42L);
-    writeAndValidate(schema, expected);
-  }
+    List<Record> expected = RandomData.generateList(schema, 100, 0L);
 
-  @Override
-  protected void writeAndValidate(Schema writeSchema, Schema expectedSchema) throws IOException {
-    List<Record> expected = RandomInternalData.generate(writeSchema, 100, 42L);
-    writeAndValidate(writeSchema, expectedSchema, expected);
-  }
+    File testFile = temp.newFile();
+    Assert.assertTrue("Delete should succeed", testFile.delete());
 
-  @Override
-  protected void writeAndValidate(Schema schema, List<Record> expected) throws IOException {
-    writeAndValidate(schema, schema, expected);
-  }
-
-  protected void writeAndValidate(Schema writeSchema, Schema expectedSchema, List<Record> expected)
-      throws IOException {
-    OutputFile outputFile = new InMemoryOutputFile();
-
-    try (DataWriter<Record> dataWriter =
-        Avro.writeData(outputFile)
-            .schema(writeSchema)
-            .createWriterFunc(InternalWriter::create)
-            .overwrite()
-            .withSpec(PartitionSpec.unpartitioned())
-            .build()) {
+    try (FileAppender<Record> writer =
+        Avro.write(Files.localOutput(testFile)).schema(schema).named("test").build()) {
       for (Record rec : expected) {
-        dataWriter.write(rec);
+        writer.add(rec);
       }
     }
 
-    List<Record> rows;
-    try (AvroIterable<Record> reader =
-        Avro.read(outputFile.toInputFile())
-            .project(expectedSchema)
-            .createResolvingReader(InternalReader::create)
+    List<InternalRow> rows;
+    try (AvroIterable<InternalRow> reader =
+        Avro.read(Files.localInput(testFile))
+            .createReaderFunc(SparkAvroReader::new)
+            .project(schema)
             .build()) {
       rows = Lists.newArrayList(reader);
     }
 
     for (int i = 0; i < expected.size(); i += 1) {
-      InternalTestHelpers.assertEquals(expectedSchema.asStruct(), expected.get(i), rows.get(i));
-    }
-
-    try (AvroIterable<Record> reader =
-        Avro.read(outputFile.toInputFile())
-            .project(expectedSchema)
-            .createResolvingReader(InternalReader::create)
-            .build()) {
-      int index = 0;
-      for (Record actualRecord : reader) {
-        InternalTestHelpers.assertEquals(
-            expectedSchema.asStruct(), expected.get(index), actualRecord);
-        index += 1;
-      }
+      assertEqualsUnsafe(schema.asStruct(), expected.get(i), rows.get(i));
     }
   }
 }

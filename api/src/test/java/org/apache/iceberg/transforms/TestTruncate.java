@@ -116,18 +116,4 @@ public class TestTruncate {
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessage("Invalid truncate width: 0 (must be > 0)");
   }
-
-  @Test
-  public void testUnknownUnsupported() {
-    assertThatThrownBy(() -> Transforms.truncate(Types.UnknownType.get(), 22))
-        .isInstanceOf(UnsupportedOperationException.class)
-        .hasMessage("Cannot truncate type: unknown");
-
-    Transform<Object, Object> truncate = Transforms.truncate(22);
-    assertThatThrownBy(() -> truncate.bind(Types.UnknownType.get()))
-        .isInstanceOf(IllegalArgumentException.class)
-        .hasMessage("Cannot bind to unsupported type: unknown");
-
-    assertThat(truncate.canTransform(Types.UnknownType.get())).isFalse();
-  }
 }

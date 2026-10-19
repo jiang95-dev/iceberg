@@ -28,6 +28,12 @@ import org.junit.jupiter.api.Test;
 
 public class TestSerializableTypes {
   @Test
+  public void testUnknownType() throws Exception {
+    assertThat(TestHelpers.roundTripSerialize(Types.UnknownType.get()))
+        .isEqualTo(Types.UnknownType.get());
+  }
+
+  @Test
   public void testIdentityTypes() throws Exception {
     // these types make a strong guarantee than equality, instances are identical
     Type[] identityPrimitives =
@@ -41,11 +47,9 @@ public class TestSerializableTypes {
           Types.TimeType.get(),
           Types.TimestampType.withoutZone(),
           Types.TimestampType.withZone(),
-          Types.TimestampNanoType.withoutZone(),
-          Types.TimestampNanoType.withZone(),
           Types.StringType.get(),
           Types.UUIDType.get(),
-          Types.BinaryType.get(),
+          Types.BinaryType.get()
         };
 
     for (Type type : identityPrimitives) {
@@ -112,37 +116,19 @@ public class TestSerializableTypes {
 
   @Test
   public void testLists() throws Exception {
-    Type[] lists =
+    Type[] maps =
         new Type[] {
           Types.ListType.ofOptional(2, Types.DoubleType.get()),
           Types.ListType.ofRequired(5, Types.DoubleType.get())
         };
 
-    for (Type list : lists) {
+    for (Type list : maps) {
       Type copy = TestHelpers.roundTripSerialize(list);
       assertThat(copy).as("List serialization should be equal to starting type").isEqualTo(list);
       assertThat(list.asNestedType().asListType().elementType())
           .as("List serialization should preserve identity type")
           .isSameAs(Types.DoubleType.get());
     }
-  }
-
-  @Test
-  public void testVariant() throws Exception {
-    Types.VariantType variant = Types.VariantType.get();
-    Type copy = TestHelpers.roundTripSerialize(variant);
-    assertThat(copy)
-        .as("Variant serialization should be equal to starting type")
-        .isEqualTo(variant);
-  }
-
-  @Test
-  public void testUnknown() throws Exception {
-    Types.UnknownType unknown = Types.UnknownType.get();
-    Type copy = TestHelpers.roundTripSerialize(unknown);
-    assertThat(copy)
-        .as("Unknown serialization should be equal to starting type")
-        .isEqualTo(unknown);
   }
 
   @Test

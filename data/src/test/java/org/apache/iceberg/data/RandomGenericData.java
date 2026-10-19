@@ -19,7 +19,6 @@
 package org.apache.iceberg.data;
 
 import static java.time.temporal.ChronoUnit.MICROS;
-import static java.time.temporal.ChronoUnit.NANOS;
 
 import java.nio.ByteBuffer;
 import java.time.Instant;
@@ -243,18 +242,11 @@ public class RandomGenericData {
         case TIME:
           return LocalTime.ofNanoOfDay((long) result * 1000);
         case TIMESTAMP:
-          Types.TimestampType ts6 = (Types.TimestampType) primitive;
-          if (ts6.shouldAdjustToUTC()) {
+          Types.TimestampType ts = (Types.TimestampType) primitive;
+          if (ts.shouldAdjustToUTC()) {
             return EPOCH.plus((long) result, MICROS);
           } else {
             return EPOCH.plus((long) result, MICROS).toLocalDateTime();
-          }
-        case TIMESTAMP_NANO:
-          Types.TimestampNanoType ts9 = (Types.TimestampNanoType) primitive;
-          if (ts9.shouldAdjustToUTC()) {
-            return EPOCH.plus((long) result, NANOS);
-          } else {
-            return EPOCH.plus((long) result, NANOS).toLocalDateTime();
           }
         default:
           return result;

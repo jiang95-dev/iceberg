@@ -153,8 +153,7 @@ public class AvroSchemaUtil {
   public static boolean isTimestamptz(Schema schema) {
     LogicalType logicalType = schema.getLogicalType();
     if (logicalType instanceof LogicalTypes.TimestampMillis
-        || logicalType instanceof LogicalTypes.TimestampMicros
-        || logicalType instanceof LogicalTypes.TimestampNanos) {
+        || logicalType instanceof LogicalTypes.TimestampMicros) {
       // timestamptz is adjusted to UTC
       Object value = schema.getObjectProp(ADJUST_TO_UTC_PROP);
 
@@ -188,15 +187,15 @@ public class AvroSchemaUtil {
   }
 
   static Schema toOption(Schema schema) {
-    switch (schema.getType()) {
-      case UNION:
-        Preconditions.checkArgument(
-            isOptionSchema(schema), "Union schemas are not supported: %s", schema);
-        return schema;
-      case NULL:
-        return schema;
-      default:
-        return Schema.createUnion(NULL, schema);
+    if (schema.getType() == Schema.Type.NULL) {
+      return schema;
+    }
+    if (schema.getType() == UNION) {
+      Preconditions.checkArgument(
+          isOptionSchema(schema), "Union schemas are not supported: %s", schema);
+      return schema;
+    } else {
+      return Schema.createUnion(NULL, schema);
     }
   }
 

@@ -116,7 +116,7 @@ class SchemaToType extends AvroSchemaVisitor<Type> {
       int tagIndex = 0;
       fields.add(Types.NestedField.required(allocateId(), "tag", Types.IntegerType.get()));
       for (Type option : options) {
-        if (option != null) {
+        if (option != null && !option.equals(Types.UnknownType.get())) {
           fields.add(Types.NestedField.optional(allocateId(), "field" + tagIndex, option));
           tagIndex++;
         }
@@ -151,7 +151,7 @@ class SchemaToType extends AvroSchemaVisitor<Type> {
       // normal array
       Schema elementSchema = array.getElementType();
       int id = getElementId(array);
-      if (AvroSchemaUtil.isOptionSchema(elementSchema)) {
+      if (AvroSchemaUtil.isOptional(elementSchema)) {
         return Types.ListType.ofOptional(id, elementType);
       } else {
         return Types.ListType.ofRequired(id, elementType);
@@ -173,54 +173,33 @@ class SchemaToType extends AvroSchemaVisitor<Type> {
   }
 
   @Override
-  public Type variant(Schema variant, Type metadataType, Type valueType) {
-    return Types.VariantType.get();
-  }
-
-  public Type logicalType(Schema primitive, LogicalType logical) {
-    String name = logical.getName();
-    if (logical instanceof LogicalTypes.Decimal) {
-      return Types.DecimalType.of(
-          ((LogicalTypes.Decimal) logical).getPrecision(),
-          ((LogicalTypes.Decimal) logical).getScale());
-
-    } else if (logical instanceof LogicalTypes.Date) {
-      return Types.DateType.get();
-
-    } else if (logical instanceof LogicalTypes.TimeMillis
-        || logical instanceof LogicalTypes.TimeMicros) {
-      return Types.TimeType.get();
-
-    } else if (logical instanceof LogicalTypes.TimestampMillis
-        || logical instanceof LogicalTypes.TimestampMicros) {
-      if (AvroSchemaUtil.isTimestamptz(primitive)) {
-        return Types.TimestampType.withZone();
-      } else {
-        return Types.TimestampType.withoutZone();
-      }
-
-    } else if (logical instanceof LogicalTypes.TimestampNanos) {
-      if (AvroSchemaUtil.isTimestamptz(primitive)) {
-        return Types.TimestampNanoType.withZone();
-      } else {
-        return Types.TimestampNanoType.withoutZone();
-      }
-
-    } else if (LogicalTypes.uuid().getName().equals(name)) {
-      return Types.UUIDType.get();
-    }
-
-    return null;
-  }
-
-  @Override
   public Type primitive(Schema primitive) {
     // first check supported logical types
     LogicalType logical = primitive.getLogicalType();
     if (logical != null) {
-      Type result = logicalType(primitive, logical);
-      if (result != null) {
-        return result;
+      String name = logical.getName();
+      if (logical instanceof LogicalTypes.Decimal) {
+        return Types.DecimalType.of(
+            ((LogicalTypes.Decimal) logical).getPrecision(),
+            ((LogicalTypes.Decimal) logical).getScale());
+
+      } else if (logical instanceof LogicalTypes.Date) {
+        return Types.DateType.get();
+
+      } else if (logical instanceof LogicalTypes.TimeMillis
+          || logical instanceof LogicalTypes.TimeMicros) {
+        return Types.TimeType.get();
+
+      } else if (logical instanceof LogicalTypes.TimestampMillis
+          || logical instanceof LogicalTypes.TimestampMicros) {
+        if (AvroSchemaUtil.isTimestamptz(primitive)) {
+          return Types.TimestampType.withZone();
+        } else {
+          return Types.TimestampType.withoutZone();
+        }
+
+      } else if (LogicalTypes.uuid().getName().equals(name)) {
+        return Types.UUIDType.get();
       }
     }
 

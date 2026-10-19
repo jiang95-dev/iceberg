@@ -82,7 +82,6 @@ public abstract class SnapshotScan<ThisT, T extends ScanTask, G extends ScanTask
 
   protected Map<Integer, PartitionSpec> specs() {
     Map<Integer, PartitionSpec> specs = table().specs();
-    // requires latest schema
     if (!useSnapshotSchema()
         || snapshotId() == null
         || table().currentSnapshot() == null
@@ -90,14 +89,12 @@ public abstract class SnapshotScan<ThisT, T extends ScanTask, G extends ScanTask
       return specs;
     }
 
-    // this is a time travel request
     Schema snapshotSchema = tableSchema();
     ImmutableMap.Builder<Integer, PartitionSpec> newSpecs =
         ImmutableMap.builderWithExpectedSize(specs.size());
     for (Map.Entry<Integer, PartitionSpec> entry : specs.entrySet()) {
       newSpecs.put(entry.getKey(), entry.getValue().toUnbound().bind(snapshotSchema));
     }
-
     return newSpecs.build();
   }
 

@@ -25,19 +25,9 @@ import java.util.List;
 import java.util.Map;
 import org.apache.avro.Schema;
 import org.apache.avro.generic.GenericData;
-import org.apache.iceberg.data.DataTest;
 import org.apache.iceberg.types.Type;
 
-public class TestAvroEncoderUtil extends DataTest {
-  @Override
-  protected boolean supportsUnknown() {
-    return true;
-  }
-
-  @Override
-  protected boolean supportsTimestampNanos() {
-    return true;
-  }
+public class TestAvroEncoderUtil extends AvroDataTest {
 
   @Override
   protected void writeAndValidate(org.apache.iceberg.Schema schema) throws IOException {

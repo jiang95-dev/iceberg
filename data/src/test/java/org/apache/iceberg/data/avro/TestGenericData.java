@@ -18,8 +18,6 @@
  */
 package org.apache.iceberg.data.avro;
 
-import static org.assertj.core.api.Assertions.assertThat;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.List;
@@ -33,35 +31,19 @@ import org.apache.iceberg.data.RandomGenericData;
 import org.apache.iceberg.data.Record;
 import org.apache.iceberg.io.FileAppender;
 import org.apache.iceberg.relocated.com.google.common.collect.Lists;
+import org.junit.Assert;
 
 public class TestGenericData extends DataTest {
-
   @Override
   protected void writeAndValidate(Schema schema) throws IOException {
-    writeAndValidate(schema, schema);
-  }
+    List<Record> expected = RandomGenericData.generate(schema, 100, 0L);
 
-  @Override
-  protected void writeAndValidate(Schema writeSchema, List<Record> expectedData)
-      throws IOException {
-    writeAndValidate(writeSchema, writeSchema, expectedData);
-  }
-
-  @Override
-  protected void writeAndValidate(Schema writeSchema, Schema expectedSchema) throws IOException {
-    List<Record> data = RandomGenericData.generate(writeSchema, 100, 0L);
-    writeAndValidate(writeSchema, expectedSchema, data);
-  }
-
-  private void writeAndValidate(Schema writeSchema, Schema expectedSchema, List<Record> expected)
-      throws IOException {
-
-    File testFile = File.createTempFile("junit", null, temp.toFile());
-    assertThat(testFile.delete()).isTrue();
+    File testFile = temp.newFile();
+    Assert.assertTrue("Delete should succeed", testFile.delete());
 
     try (FileAppender<Record> writer =
         Avro.write(Files.localOutput(testFile))
-            .schema(writeSchema)
+            .schema(schema)
             .createWriterFunc(DataWriter::create)
             .named("test")
             .build()) {
@@ -73,29 +55,14 @@ public class TestGenericData extends DataTest {
     List<Record> rows;
     try (AvroIterable<Record> reader =
         Avro.read(Files.localInput(testFile))
-            .project(expectedSchema)
-            .createResolvingReader(PlannedDataReader::create)
+            .project(schema)
+            .createReaderFunc(DataReader::create)
             .build()) {
       rows = Lists.newArrayList(reader);
     }
 
     for (int i = 0; i < expected.size(); i += 1) {
-      DataTestHelpers.assertEquals(expectedSchema.asStruct(), expected.get(i), rows.get(i));
+      DataTestHelpers.assertEquals(schema.asStruct(), expected.get(i), rows.get(i));
     }
-  }
-
-  @Override
-  protected boolean supportsDefaultValues() {
-    return true;
-  }
-
-  @Override
-  protected boolean supportsUnknown() {
-    return true;
-  }
-
-  @Override
-  protected boolean supportsTimestampNanos() {
-    return true;
   }
 }

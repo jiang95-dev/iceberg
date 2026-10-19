@@ -19,6 +19,7 @@
 package org.apache.iceberg;
 
 import static org.apache.iceberg.types.Types.NestedField.required;
+import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.File;
 import java.io.IOException;
@@ -36,6 +37,26 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 
 public class TestPartitioning {
+
+  @Test
+  public void testDroppedSourceTypesFromUpstreamBackport() {
+    Schema schema =
+        new Schema(
+            Types.NestedField.optional(1, "id", Types.LongType.get()),
+            Types.NestedField.optional(2, "data", Types.StringType.get()));
+    for (PartitionSpec spec :
+        java.util.Arrays.asList(
+            PartitionSpec.builderFor(schema).identity("id").build(),
+            PartitionSpec.builderFor(schema).bucket("id", 8).build(),
+            PartitionSpec.builderFor(schema).truncate("id", 10).build())) {
+      PartitionSpec restored =
+          PartitionSpecParser.fromJson(schema.select("data"), PartitionSpecParser.toJson(spec));
+      boolean bucket = spec.fields().get(0).transform().toString().startsWith("bucket");
+      assertThat(restored.partitionType().fields().get(0).type())
+          .isEqualTo(bucket ? Types.IntegerType.get() : Types.UnknownType.get());
+      assertThat(restored.javaClasses()[0]).isEqualTo(bucket ? Integer.class : Object.class);
+    }
+  }
 
   private static final int V1_FORMAT_VERSION = 1;
   private static final int V2_FORMAT_VERSION = 2;
@@ -162,7 +183,7 @@ public class TestPartitioning {
 
     PartitionSpec newSpec = PartitionSpec.builderFor(table.schema()).identity("category").build();
 
-    TableOperations ops = table.operations();
+    TableOperations ops = ((HasTableOperations) table).operations();
     TableMetadata current = ops.current();
     ops.commit(current, current.updatePartitionSpec(newSpec));
 
@@ -171,80 +192,6 @@ public class TestPartitioning {
     Assertions.assertThatThrownBy(() -> Partitioning.partitionType(table))
         .isInstanceOf(ValidationException.class)
         .hasMessageStartingWith("Conflicting partition fields");
-  }
-
-  @Test
-  public void testPartitionTypeIgnoreInactiveFields() {
-    TestTables.TestTable table =
-        TestTables.create(
-            tableDir, "test", SCHEMA, BY_DATA_CATEGORY_BUCKET_SPEC, V2_FORMAT_VERSION);
-
-    StructType actualType = Partitioning.partitionType(table);
-    assertThat(actualType)
-        .isEqualTo(
-            StructType.of(
-                NestedField.optional(1000, "data", Types.StringType.get()),
-                NestedField.optional(1001, "category_bucket", Types.IntegerType.get())));
-
-    // Create a new spec, and drop the field of the old spec
-    table.updateSpec().removeField("category_bucket").commit();
-    table.updateSchema().deleteColumn("category").commit();
-
-    actualType = Partitioning.partitionType(table);
-    assertThat(actualType)
-        .isEqualTo(StructType.of(NestedField.optional(1000, "data", Types.StringType.get())));
-
-    table.updateSpec().removeField("data").commit();
-    table.updateSchema().deleteColumn("data").commit();
-
-    actualType = Partitioning.partitionType(table);
-    assertThat(actualType).isEqualTo(StructType.of());
-  }
-
-  @Test
-  public void testPartitionTypeWithDroppedSourceColumn() {
-    TestTables.TestTable table =
-        TestTables.create(
-            tableDir, "test", SCHEMA, BY_DATA_CATEGORY_BUCKET_SPEC, V2_FORMAT_VERSION);
-
-    table.updateSpec().removeField("category_bucket").commit();
-    table.updateSchema().deleteColumn("category").commit();
-
-    // bucket has a fixed result type that does not depend on the dropped source column
-    assertThat(table.specs().get(0).partitionType())
-        .isEqualTo(
-            StructType.of(
-                NestedField.optional(1000, "data", Types.StringType.get()),
-                NestedField.optional(1001, "category_bucket", Types.IntegerType.get())));
-
-    table.updateSpec().removeField("data").commit();
-    table.updateSchema().deleteColumn("data").commit();
-
-    // the identity result type cannot be determined without the source column
-    assertThat(table.specs().get(0).partitionType())
-        .isEqualTo(
-            StructType.of(
-                NestedField.optional(1000, "data", Types.UnknownType.get()),
-                NestedField.optional(1001, "category_bucket", Types.IntegerType.get())));
-  }
-
-  @Test
-  public void testPartitionTypeWithUnknownTransformAndDroppedSourceColumn() {
-    // a spec written by an engine with a transform this library does not implement parses as an
-    // UnknownTransform; if the source column is also dropped, the result type stays string
-    // (UnknownTransform's fixed result type) rather than falling back to unknown
-    Schema schemaWithoutCategory =
-        new Schema(
-            required(1, "id", Types.IntegerType.get()),
-            required(2, "data", Types.StringType.get()));
-    String specJson =
-        "{\"spec-id\": 1, \"fields\": [{\"name\": \"category_custom\", "
-            + "\"transform\": \"custom\", \"source-id\": 3, \"field-id\": 1000}]}";
-    PartitionSpec spec = PartitionSpecParser.fromJson(schemaWithoutCategory, specJson);
-
-    assertThat(spec.partitionType())
-        .isEqualTo(
-            StructType.of(NestedField.optional(1000, "category_custom", Types.StringType.get())));
   }
 
   @Test
@@ -478,48 +425,5 @@ public class TestPartitioning {
             .build();
 
     Assert.assertEquals("The spec should be there", spec, table.spec());
-  }
-
-  @Test
-  public void deleteFileAfterDeletingAllPartitionFields() {
-    TestTables.TestTable table =
-        TestTables.create(tableDir, "test", SCHEMA, BY_DATA_SPEC, V2_FORMAT_VERSION);
-
-    DataFile dataFile =
-        DataFiles.builder(BY_DATA_SPEC)
-            .withPath("/path/to/data-a.parquet")
-            .withFileSizeInBytes(10)
-            .withPartitionPath("data=1")
-            .withRecordCount(1)
-            .build();
-
-    table.newAppend().appendFile(dataFile).commit();
-    assertThat(table.currentSnapshot().summary()).containsEntry("added-data-files", "1");
-    table.updateSpec().removeField("data").commit();
-    table.updateSchema().deleteColumn("data").commit();
-    table.newDelete().deleteFile(dataFile).commit();
-    assertThat(table.currentSnapshot().summary()).containsEntry("deleted-data-files", "1");
-  }
-
-  @Test
-  public void deleteFileAfterDeletingOnePartitionField() {
-    TestTables.TestTable table =
-        TestTables.create(tableDir, "test", SCHEMA, BY_CATEGORY_DATA_SPEC, V2_FORMAT_VERSION);
-
-    // drop one out of 2 partition fields
-    DataFile dataFile =
-        DataFiles.builder(BY_CATEGORY_DATA_SPEC)
-            .withPath("/path/to/data-b.parquet")
-            .withFileSizeInBytes(10)
-            .withPartitionPath("category=2/data=2")
-            .withRecordCount(1)
-            .build();
-
-    table.newAppend().appendFile(dataFile).commit();
-    assertThat(table.currentSnapshot().summary()).containsEntry("added-data-files", "1");
-    table.updateSpec().removeField("data").commit();
-    table.updateSchema().deleteColumn("data").commit();
-    table.newDelete().deleteFile(dataFile).commit();
-    assertThat(table.currentSnapshot().summary()).containsEntry("deleted-data-files", "1");
   }
 }

@@ -31,7 +31,6 @@ import org.apache.avro.io.Encoder;
 import org.apache.iceberg.avro.ValueWriter;
 import org.apache.iceberg.avro.ValueWriters;
 import org.apache.iceberg.data.Record;
-import org.apache.iceberg.util.DateTimeUtil;
 
 class GenericWriters {
   private GenericWriters() {}
@@ -50,14 +49,6 @@ class GenericWriters {
 
   static ValueWriter<OffsetDateTime> timestamptz() {
     return TimestamptzWriter.INSTANCE;
-  }
-
-  static ValueWriter<LocalDateTime> timestampNanos() {
-    return TimestampNanoWriter.INSTANCE;
-  }
-
-  static ValueWriter<OffsetDateTime> timestamptzNanos() {
-    return TimestamptzNanoWriter.INSTANCE;
   }
 
   static ValueWriter<Record> struct(List<ValueWriter<?>> writers) {
@@ -96,7 +87,7 @@ class GenericWriters {
 
     @Override
     public void write(LocalDateTime timestamp, Encoder encoder) throws IOException {
-      encoder.writeLong(DateTimeUtil.microsFromTimestamp(timestamp));
+      encoder.writeLong(ChronoUnit.MICROS.between(EPOCH, timestamp.atOffset(ZoneOffset.UTC)));
     }
   }
 
@@ -107,29 +98,7 @@ class GenericWriters {
 
     @Override
     public void write(OffsetDateTime timestamptz, Encoder encoder) throws IOException {
-      encoder.writeLong(DateTimeUtil.microsFromTimestamptz(timestamptz));
-    }
-  }
-
-  private static class TimestampNanoWriter implements ValueWriter<LocalDateTime> {
-    private static final TimestampNanoWriter INSTANCE = new TimestampNanoWriter();
-
-    private TimestampNanoWriter() {}
-
-    @Override
-    public void write(LocalDateTime timestamp, Encoder encoder) throws IOException {
-      encoder.writeLong(DateTimeUtil.nanosFromTimestamp(timestamp));
-    }
-  }
-
-  private static class TimestamptzNanoWriter implements ValueWriter<OffsetDateTime> {
-    private static final TimestamptzNanoWriter INSTANCE = new TimestamptzNanoWriter();
-
-    private TimestamptzNanoWriter() {}
-
-    @Override
-    public void write(OffsetDateTime timestamptz, Encoder encoder) throws IOException {
-      encoder.writeLong(DateTimeUtil.nanosFromTimestamptz(timestamptz));
+      encoder.writeLong(ChronoUnit.MICROS.between(EPOCH, timestamptz));
     }
   }
 

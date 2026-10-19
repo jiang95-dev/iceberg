@@ -370,10 +370,6 @@ public class TypeUtil {
     return visit(schema, new FindTypeVisitor(predicate));
   }
 
-  public static Type find(Type type, Predicate<Type> predicate) {
-    return visit(type, new FindTypeVisitor(predicate));
-  }
-
   public static boolean isPromotionAllowed(Type from, Type.PrimitiveType to) {
     // Warning! Before changing this function, make sure that the type change doesn't introduce
     // compatibility problems in partitioning.
@@ -514,7 +510,6 @@ public class TypeUtil {
       case BINARY:
         return 80;
       case UNKNOWN:
-        // Consider Unknown as null
         return 0;
       case DECIMAL:
         // 12 (header) + (12 + 12 + 4) (BigInteger) + 4 (scale) = 44 bytes

@@ -337,7 +337,7 @@ public class Partitioning {
         || t2.equals(Transforms.alwaysNull());
   }
 
-  // collects IDs of all partition field used across specs that are in the current schema
+  // collects IDs of all partition field used across specs
   private static Set<Integer> allActiveFieldIds(Schema schema, Collection<PartitionSpec> specs) {
     return FluentIterable.from(specs)
         .transformAndConcat(PartitionSpec::fields)
