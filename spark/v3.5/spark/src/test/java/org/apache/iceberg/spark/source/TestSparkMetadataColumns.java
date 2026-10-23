@@ -220,6 +220,28 @@ public class TestSparkMetadataColumns extends TestBase {
   }
 
   @TestTemplate
+  public void testPartitionMetadataColumnWithIdentifierField() {
+    table
+        .updateSchema()
+        .allowIncompatibleChanges()
+        .requireColumn("id")
+        .setIdentifierFields("id")
+        .commit();
+    table.updateSpec().addField("id").commit();
+
+    sql("INSERT INTO TABLE %s VALUES (1, 'a1', 'b1')", TABLE_NAME);
+
+    assertEquals(
+        "Rows must match",
+        ImmutableList.of(row(1L, "a1")),
+        sql("SELECT id, category FROM %s", TABLE_NAME));
+    assertEquals(
+        "Rows must match",
+        ImmutableList.of(row(1L, row(1L))),
+        sql("SELECT id, _partition FROM %s", TABLE_NAME));
+  }
+
+  @TestTemplate
   public void testPositionMetadataColumnWithMultipleRowGroups() throws NoSuchTableException {
     assumeThat(fileFormat).isEqualTo(FileFormat.PARQUET);
 
